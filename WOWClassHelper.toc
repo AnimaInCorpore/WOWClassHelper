@@ -1,0 +1,36 @@
+## Interface: 16001
+## Title: WOWClassHelper
+## Notes: Gear advisor for every class and spec in WoW Forever
+## Author: Sascha
+## Version: 0.1.0
+## SavedVariables: WOWClassHelperDB
+## SavedVariablesPerCharacter: WOWClassHelperCharDB
+## IconTexture: Interface\Icons\INV_Misc_Gear_01
+## AddonCompartmentFunc: WOWClassHelper_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: WOWClassHelper_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: WOWClassHelper_OnAddonCompartmentLeave
+
+Core\Core.lua
+Data\Items.lua
+Data\Sets.lua
+Data\Talents.lua
+Core\Spec.lua
+Core\Weights.lua
+Core\ItemData.lua
+Core\Character.lua
+Core\SetBonus.lua
+Core\KnowledgeBase.lua
+Core\Compare.lua
+Classes\Warrior.lua
+Classes\Paladin.lua
+Classes\Hunter.lua
+Classes\Rogue.lua
+Classes\Priest.lua
+Classes\Shaman.lua
+Classes\Mage.lua
+Classes\Warlock.lua
+Classes\Druid.lua
+UI\VerdictTooltip.lua
+UI\ManaBar.lua
+UI\Compartment.lua
+UI\Debug.lua

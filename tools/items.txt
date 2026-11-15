@@ -1,0 +1,60 @@
+# Item IDs to export into Data/Items.lua (one per line, '#' starts a comment).
+# Run: pwsh tools/Export-Items.ps1
+# Only IDs that exist in the WoW Forever dataset (static-forever-*) are exported;
+# missing ones are reported and skipped. The addon reads live item data from
+# the game; exported items are only a fallback when the game returns no stats.
+# The smoke test (tools/smoke-test.lua) uses several of these items.
+
+# --- Priest ---------------------------------------------------------------
+
+# Vestments of the Virtuous (Priest dungeon set, item-set 514)
+22078   # Virtuous Belt
+22079   # Virtuous Bracers
+22080   # Virtuous Crown
+22081   # Virtuous Gloves
+22082   # Virtuous Mantle
+22083   # Virtuous Robe
+22084   # Virtuous Sandals
+22085   # Virtuous Skirt
+
+# Vestments of Faith (Priest Naxxramas set, item-set 525)
+22512   # Robe of Faith
+22513   # Leggings of Faith
+22514   # Circlet of Faith
+22515   # Shoulderpads of Faith
+22516   # Sandals of Faith
+22517   # Gloves of Faith
+22518   # Belt of Faith
+22519   # Bindings of Faith
+23061   # Ring of Faith
+
+# Weapons and wands
+18608   # Benediction (healer staff)
+18609   # Anathema (shadow staff, +Shadow damage)
+21275   # Blessed Qiraji Augur Staff
+5240    # Torchlight Wand
+11287   # Lesser Magic Wand
+11288   # Greater Magic Wand
+11289   # Lesser Mystic Wand
+19309   # Tome of Shadow Force (off hand, +Shadow damage)
+
+# Hit rating (Forever: 10 hit rating = 1% at level 60) and healer trinket
+19379   # Neltharion's Tear
+19403   # Band of Forced Concentration
+21709   # Ring of the Fallen God
+21585   # Dark Storm Gauntlets
+19395   # Rejuvenating Gem
+
+# --- Paladin --------------------------------------------------------------
+
+19019   # Thunderfury, Blessed Blade of the Windseeker (test item)
+
+# Soulforge Armor (Paladin set, item-set 516)
+22086   # Soulforge Belt
+22087   # Soulforge Boots
+22088   # Soulforge Bracers
+22089   # Soulforge Breastplate
+22090   # Soulforge Gauntlets
+22091   # Soulforge Helm
+22092   # Soulforge Legplates
+22093   # Soulforge Spaulders
