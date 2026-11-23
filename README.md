@@ -27,16 +27,21 @@ Best head items seen                     this #1 of 3
 | Line | Content |
 |---|---|
 | 1 | Main action for your current spec, and its score change (percent hidden if the replaced item is nearly worthless) |
-| 2 | Reason, only when there is one ("Requires level 60", "Plate can be worn from level 40", "Priests can't use Leather", "Upgrade for Shadow (Damage)") |
+| 2 | Reason, only when there is one ("Requires level 60", "Plate can be worn from level 40", "Priests can't use Leather", "Upgrade for Shadow (Damage)", "Loses main stats: Agility -4") |
 | 3 | What the item replaces, your spec and level |
+| with | Only against a worn two-hander: the item from your bags or bank that the one-hander or off hand is paired with, e.g. "with [Orb of Ice] in the off hand (bags)" |
 | 4 | The other two specs: icon, short name, verdict icon and score change |
-| 5-6 | Biggest stat changes for your spec, two per line |
+| 5-6 | Stat changes for your spec, two per line: **main stats first** (white label, with the change against what your gear has of the stat, e.g. "Agility +6 (+5%)"), then the biggest other changes |
 | not counted | Grey: the item's stats that are worth nothing for your spec, e.g. "Not counted: Spell Power +20" on a staff for a Warrior |
 | sets | Set bonuses that switch on or off with their value, otherwise the set progress in one line |
+| lasts | While leveling: "Lasts to level 36, yours to 31" and what that adds to the score (see Longevity) |
+| source | How the item is obtained, as far as the addon has seen it: "Source: Quest (The Defias Brotherhood)", Dungeon, Raid, Crafted, Vendor, Drop |
 | note | Grey: slot note ("Fills your empty off hand (dual wield, off-hand damage counts half)"), the level mix while leveling ("level 13: questing 94%"), "spec set manually", or "no spec found" |
 | list | Best items seen for the slot, see below |
 
-Unusable and already equipped items show only the action, reason and list.
+Unusable and already equipped items show only the action, reason, source and
+list. Item names longer than 30 characters (20 in a pair) are cut with "..."
+so the tooltip doesn't grow wide; chat output keeps the full names.
 
 The verdict tooltip sits below the item tooltip and also below the "currently
 equipped" comparison tooltips beside it, so they don't overlap. If there is no
@@ -49,8 +54,11 @@ room at the bottom of the screen, it goes above the item tooltip.
 | Take it now | bright green | check mark | Equip now / Buy & equip / Take & equip |
 | Keep it | soft green | check mark | Keep for level N, Keep (set piece), Keep for Shadow / Buy ... / Take ... |
 | Neutral | yellow | question mark | Equal - your choice / Optional / Optional |
-| Get rid of it | red | cross | Sell or Drop / Skip / Loot & sell or Leave it |
-| Info | grey | - | Can't use - sell / Can't use - skip / Currently equipped |
+| Get rid of it | red | cross | Do not take/sell (or /drop for items without a sell price) / Skip / Loot & sell or Leave it |
+| Info | grey | - | Can't use - do not take/sell / Can't use - skip / Currently equipped |
+
+The bag text also covers quest rewards and chat links, hence "do not take"
+(a quest reward) or "sell" (an item you already have).
 
 Colors, icons and limits are defined at the top of
 [UI/VerdictTooltip.lua](UI/VerdictTooltip.lua).
@@ -62,10 +70,29 @@ for the hovered item's slot group (head, rings, trinkets, weapons, off hands,
 ranged weapons or wands, relics, ...), scored for your current spec. Only
 items you can use at your current level are listed. The header shows the
 hovered item's rank: `this #2 of 14`, or `this #1 at level 60` for items that
-need a higher level. The right column shows the item's own score, where it is
-(`worn`, `bags`, `bank`, `vendor`, `loot`, `chat`, `seen`) and its improvement
-over your current gear, the same number as in the first line when you hover
-that item. `/wch best <slot>` shows the same in chat.
+need a higher level. The right column shows the item's own score (with its
+longevity while leveling), where you have it (`worn`, `bags`, `bank`), how it
+is obtained (`quest`, `dungeon`, `raid`, `crafted`, `vendor`, `drop`; colored)
+or else where it was seen (`chat`, `seen`), and its improvement over your
+current gear, the same number as in the first line when you hover that item.
+`/wch best <slot>` shows the same in chat, with the quest, instance, vendor or
+profession name.
+
+### Where items come from
+
+The knowledge base remembers how each item can be obtained, from what you
+see in game: quest rewards in the quest dialog or hovered in the quest log
+(with the quest title), loot, loot rolls and the group's loot messages inside
+a dungeon or raid (with its name), gear in an open profession window
+(crafted, with the profession), merchants (vendor) and loot outside
+instances (drop, with the zone). Items only seen in chat or tooltips have no
+source yet.
+
+In the weapons list, one-handers and two-handers compete on equal terms: a
+one-hander is listed as a pair with the best off hand you've seen
+(`[Mace] + [Orb]`; a worn one-hander with your worn off hand), and its score
+and improvement are those of the pair against both your hands. For dual
+wielders the partner can be a second one-hander at half DPS.
 
 ## How the suggestion works
 
@@ -88,11 +115,20 @@ character), `/wch spec auto` goes back to automatic.
 For each spec of your class:
 
 1. **Replaced items:** the item is compared with the equipped item in the same
-   slot. For rings and trinkets it replaces the weaker one, a two-hander
-   replaces main hand + off hand, and for classes that dual wield (Warriors
-   and Hunters from 20, Rogues) a one-hander replaces the weaker hand weapon
-   or fills an empty off hand. **Off-hand weapon DPS counts half** (off-hand
-   attacks deal half damage).
+   slot. For rings and trinkets it replaces the weaker one, and for classes
+   that dual wield (Warriors and Hunters from 20, Rogues) a one-hander
+   replaces the weaker hand weapon or fills an empty off hand. **Off-hand
+   weapon DPS counts half** (off-hand attacks deal half damage).
+   **Two-handers against one-hander + off hand:** a two-hander is compared
+   with your main hand and off hand together. The other way round, a
+   one-hander or off hand hovered while you wear a two-hander is paired with
+   the best fitting item you carry in your bags or bank (an off hand for a
+   one-hander, a one-hander for an off hand; for dual wielders also a second
+   one-hander), and the pair is compared with the two-hander. So a mace can
+   be "Equip now" against your staff because of the orb in your bags. Only
+   items you can use at your level are partners, and an item is never paired
+   with itself. Without a partner the item is compared alone ("off hand
+   becomes free").
 2. **Stat score:** stat changes x spec weights, computed for your **level**
    and **learned talents** (see below).
 3. **Caps based on current stats:** for capped stats (hit for damage specs,
@@ -107,11 +143,48 @@ For each spec of your class:
    "Improves your chance to hit by 1.0%" are parsed (percent is converted to
    rating, melee/ranged/spell by spec). Procs have hand-set values per class;
    others get a default value.
-5. **Verdict:** Upgrade, Keep for later (level too low, or the armor/weapon
+5. **Longevity (while leveling):** see below.
+6. **Main stats lead:** each spec has main stats. An item that loses main
+   stats compared with your gear is at best "Equal", however much Stamina,
+   Armor or resistances it adds; the reason line names the loss
+   ("Loses main stats: Agility -4"). Main stats count over their lifetime, so
+   a lower-level item in your level range isn't held back by this rule.
+7. **Verdict:** Upgrade, Keep for later (level too low, or the armor/weapon
    type is learned later), Keep (set piece you're collecting), Equal, Scrap,
    Can't use, Equipped. An item whose stats are all "not counted" for your
    spec is scrap, not "equal". If the item is no upgrade for your current
    spec but is for another one, it says "Keep for <spec>".
+
+### Longevity while leveling
+
+Gear is outgrown some levels after its required level, and better quality
+lasts longer. The addon estimates the level up to which an item stays
+current: its required level (or item level - 5) plus 2 levels for poor, 4
+for common, 7 for uncommon (green), 11 for rare (blue), 16 for epic items.
+While leveling, each level an item stays current in the next 10 levels adds
+3% of its score, for the new item and, subtracted, for the one it replaces.
+So a green item in your level range beats a blue one from 10 levels ago with
+slightly better stats, and a blue item beats a green one of the same level
+with the same stats. The list is ranked the same way. Items that need a
+higher level count from that level. At max level longevity doesn't count.
+The numbers are at the top of the longevity section in
+[Core/Compare.lua](Core/Compare.lua).
+
+### Main stats per spec
+
+| Spec | Main stats |
+|---|---|
+| Healers | Healing, spell power, Intellect, Spirit, mana regeneration |
+| Tanks | Stamina, Armor, defense, dodge, parry, block, block value |
+| Caster damage | Spell damage and spell power (every school), Intellect |
+| Melee damage | Strength, Agility, attack power, weapon DPS |
+| Ranged damage | Agility, ranged attack power, attack power, ranged weapon DPS |
+| Extras | Warlocks: Stamina (Life Tap); Enhancement: Intellect (Mental Dexterity); Feral: Stamina, Armor (bear form) |
+
+The defaults are `Weights.MAIN_STATS` in [Core/Weights.lua](Core/Weights.lua);
+a spec in a class profile adds its own with `mainExtra`. Which stats count
+and how much is still decided by the spec weights; the main stats only decide
+what can't be traded away for minor stats.
 
 ### Stat weights: level, talents and what saturates
 
@@ -190,8 +263,10 @@ Every item you see is stored in `WOWClassHelperDB.kb`, shared by all
 characters of the account (an item a Warrior saw shows up in a Mage's list if
 the Mage can use it). That includes items you hover over, loot, see at a
 merchant (with price and vendor), carry in your bags, store in your bank, see
-in loot chat messages, or wear. What's in your bags and bank is stored per
-character (`WOWClassHelperCharDB`), as is the spec override.
+in loot chat messages, or wear, and quest rewards, loot rolls and gear in an
+open profession window, each with how it is obtained (see "Where items come
+from"). What's in your bags and bank is stored per character
+(`WOWClassHelperCharDB`), as is the spec override.
 
 **Taking over the old knowledge bases:** if WOWPriest or WOWPaladin is still
 enabled when you log in, their saved items and Legacy perk rank are copied
@@ -306,16 +381,20 @@ of the WOWPriest and WOWPaladin smoke tests and adds checks for every class:
 profile consistency with the talent data, weights at every level with and
 without talents, spec detection from each class's talent tree, a verdict and
 tooltip for a set of items at levels 12, 35 and 60, usable gear and level
-gates, dual wield, ranged and Feral weapon DPS, talent effects, and the import
-of the old knowledge bases. The stubs are strict: unknown frame methods,
-events and script names, `SetBackdrop` without `BackdropTemplate`, and any
-calculation with a *secret value* raise errors. `-ShowTooltips` prints every
-rendered verdict tooltip, `-ShowChat` what the addon writes to chat. It needs
-Lua 5.1 from msys2:
+gates, dual wield, two-handers against one-hander + off hand pairs, ranged and
+Feral weapon DPS, longevity while leveling, main stats, long (UTF-8) item
+names, item sources, talent effects, and the import of the old knowledge
+bases. The stubs are strict: unknown frame methods, events and script names,
+`SetBackdrop` without `BackdropTemplate`, and any calculation with a *secret
+value* raise errors. `-ShowTooltips` prints every rendered verdict tooltip,
+`-ShowChat` what the addon writes to chat. It needs Lua 5.1 from msys2:
 
 ```powershell
 C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-lua51"
 ```
+
+LuaJIT (Lua 5.1 compatible) works too:
+`pwsh tools/Smoke-Test.ps1 -Lua C:\msys64\ucrt64\bin\luajit.exe`.
 
 The smoke test can't tell whether the real WoW Forever client behaves like
 the stubs, so `/wch debug` in game is still the real test.

@@ -25,8 +25,9 @@ ns:RegisterClass("SHAMAN", {
     specs = {
         { key = "ELEMENTAL", id = 375, retailIDs = { 262 }, name = "Elemental", short = "Ele", role = "Damage",
           attack = "SPELL", icon = "Interface\\Icons\\Spell_Nature_Lightning" },
+        -- mainExtra: Mental Dexterity turns Intellect into attack power
         { key = "ENHANCEMENT", id = 373, retailIDs = { 263 }, name = "Enhancement", short = "Enh", role = "Damage",
-          attack = "MELEE", icon = "Interface\\Icons\\Spell_Nature_LightningShield" },
+          attack = "MELEE", icon = "Interface\\Icons\\Spell_Nature_LightningShield", mainExtra = { "INTELLECT" } },
         { key = "RESTORATION", id = 374, retailIDs = { 264 }, name = "Restoration", short = "Resto", role = "Healer",
           attack = "SPELL", icon = "Interface\\Icons\\Spell_Nature_MagicImmunity" },
     },

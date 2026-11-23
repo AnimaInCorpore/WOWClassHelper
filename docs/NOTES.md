@@ -29,6 +29,29 @@
     knowledge bases, school damage set texts for every school
   - Paladin labels are now "Retribution (Damage)" (spec first) like all other
     classes; the tooltip still uses Tank / Healer / Damage as short names.
+- **2026-11-23:** two-handers are compared with one-hander + off hand pairs
+  (`Compare.Plan`, `Compare.BestPartner`). Against a worn two-hander, a
+  hovered one-hander or off hand is paired with the best fitting item from
+  bags and bank; the weapons list ranks one-handers as pairs with the best
+  off hand seen. Fixed on the way: an off-hand-only weapon compared against
+  a two-hander halved the two-hander's DPS too; now only the off-hand
+  weapon's DPS counts half.
+- **2026-11-23:** longevity while leveling (`Compare.LIFESPAN`,
+  `Compare.LONGEVITY_PER_LEVEL`), main stats per spec that an item can't
+  trade away for minor stats (`Weights.MAIN_STATS`, `mainExtra` in the
+  profiles), "Do not take/sell" instead of "Sell", long item names cut in the
+  tooltip (UTF-8 aware), and item sources (quest, dungeon, raid, crafted,
+  vendor, drop) in the knowledge base and tooltip.
+
+## Open points (sources and longevity)
+
+- The quest log, quest dialog and profession frame names
+  (`QuestFrame`, `QuestLogFrame`, `QuestInfoFrame`, `TradeSkillFrame`) and the
+  APIs `GetTitleText`, `GetQuestItemLink`, `GetTradeSkillItemLink`,
+  `GetLootRollItemLink`, `IsInInstance` are the classic ones; check in game
+  that WoW Forever has them (missing ones are skipped, not errors).
+- The lifespans per quality (green 7, blue 11, epic 16 levels) and the 3% per
+  level are estimates; tune them in `Core/Compare.lua`.
 
 ## Sources
 

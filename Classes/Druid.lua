@@ -23,8 +23,9 @@ ns:RegisterClass("DRUID", {
     specs = {
         { key = "BALANCE", id = 574, retailIDs = { 102 }, name = "Balance", short = "Balance", role = "Damage",
           attack = "SPELL", icon = "Interface\\Icons\\Spell_Nature_StarFall" },
+        -- mainExtra: bear form tanks with Stamina and Armor
         { key = "FERAL", id = 134, retailIDs = { 103, 104 }, name = "Feral", short = "Feral", role = "Cat/Bear",
-          attack = "MELEE", icon = "Interface\\Icons\\Ability_Racial_BearForm" },
+          attack = "MELEE", icon = "Interface\\Icons\\Ability_Racial_BearForm", mainExtra = { "STAMINA", "ARMOR" } },
         { key = "RESTORATION", id = 573, retailIDs = { 105 }, name = "Restoration", short = "Resto", role = "Healer",
           attack = "SPELL", icon = "Interface\\Icons\\Spell_Nature_HealingTouch" },
     },

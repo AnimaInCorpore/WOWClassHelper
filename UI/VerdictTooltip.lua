@@ -5,6 +5,7 @@
 --
 --   [v] Equip now                     +62.6 (+108%)   action, score for your spec
 --   vs. [Virtuous Crown]                    Holy 60   what it replaces
+--   with [Orb] in the off hand (bags)                 partner against a two-hander
 --   [D] Disc [v] +63.9    [S] Shadow [x] -16.7        the other two specs
 --   Not counted: Fire Damage +1                       stats worth nothing for your spec
 --   Healing +75                     Spell Power -11   biggest stat changes,
@@ -54,7 +55,26 @@ local VERDICT_TONE = {
 
 local SET_COLOR  = { 1.00, 0.90, 0.50 }   -- set bonus lines, distinct from neutral yellow
 local LIST_COLOR = { 0.55, 0.75, 1.00 }   -- "Best ... seen" header
+local LIFE_COLOR = { 0.65, 0.90, 0.85 }   -- "Lasts to level ..." line
 local GREY, LIGHT, WHITE = { 0.6, 0.6, 0.6 }, { 0.8, 0.8, 0.8 }, { 1, 1, 1 }
+
+-- How an item is obtained (Compare.Origins), as a tag in the list and the
+-- "Source:" line
+local ORIGIN_COLORS = {
+    quest   = { 1.00, 0.82, 0.00 },
+    dungeon = { 0.40, 0.70, 1.00 },
+    raid    = { 0.75, 0.50, 1.00 },
+    crafted = { 0.45, 0.90, 0.45 },
+    vendor  = { 0.80, 0.80, 0.80 },
+    drop    = { 0.85, 0.75, 0.60 },
+}
+local ORIGIN_NAMES = {
+    quest = "Quest", dungeon = "Dungeon", raid = "Raid", crafted = "Crafted", vendor = "Vendor", drop = "Drop",
+}
+
+-- Item names longer than this (characters) are cut with "..." so the
+-- tooltip doesn't grow wide; pairs ("[A] + [B]") get less room per name
+local MAX_NAME, MAX_PAIR_NAME = 30, 20
 
 -- No score, stats or other specs for these: the action line says it all
 local NO_SCORE = { UNUSABLE = true, EQUIPPED = true }
@@ -91,6 +111,28 @@ local function Fmt(v)
     return (rounded > 0 and "+" or "") .. rounded
 end
 
+-- Cuts a name to `max` characters (UTF-8 aware: German, French, ... names)
+local function ShortName(name, max)
+    local chars = {}
+    for ch in name:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        chars[#chars + 1] = ch
+        if #chars > max then break end
+    end
+    if #chars <= max then return name end
+    return (table.concat(chars, "", 1, max - 1):gsub("%s+$", "")) .. "..."
+end
+
+-- An item as "[Name]" in its quality color, the name cut to `max` characters
+local function ItemText(item, max)
+    local name = item.name
+    if not name then return item.link or "?" end
+    local short = ShortName(name, max or MAX_NAME)
+    if short == name and item.link then return item.link end
+    local q = ITEM_QUALITY_COLORS and item.quality and ITEM_QUALITY_COLORS[item.quality]
+    local color = (q and q.hex) or (item.link and item.link:match("^|c%x%x%x%x%x%x%x%x")) or ""
+    return color .. "[" .. short .. "]" .. (color ~= "" and "|r" or "")
+end
+
 local function ScoreText(role)
     local text = Fmt(role.score)
     if role.pct and role.base >= MIN_BASE_FOR_PCT and role.pct <= MAX_PCT then
@@ -122,6 +164,50 @@ local function DetectContext(tooltip)
     end
     local name = owner.GetName and owner:GetName()
     if name and name:find("^GroupLootFrame") then return "LOOT" end
+    return nil
+end
+
+-- How an item is obtained, from the window it is shown in: quest rewards
+-- (quest dialog, quest log) and profession recipes
+local QUEST_FRAMES = { "QuestFrame", "QuestLogFrame", "QuestLogDetailFrame", "QuestMapFrame", "QuestInfoFrame" }
+
+local function SafeCall(func, ...)
+    if type(func) ~= "function" then return nil end
+    local ok, a = pcall(func, ...)
+    if ok then return a end
+    return nil
+end
+
+local function QuestTitle()
+    if QuestFrame and QuestFrame:IsShown() then
+        local title = SafeCall(GetTitleText)
+        if type(title) == "string" and title ~= "" then return title end
+    end
+    local index = SafeCall(GetQuestLogSelection)
+    if type(index) == "number" and index > 0 then
+        local title = SafeCall(GetQuestLogTitle, index)
+        if type(title) == "string" and title ~= "" then return title end
+    end
+    if C_QuestLog and C_QuestLog.GetSelectedQuest and C_QuestLog.GetTitleForQuestID then
+        local id = SafeCall(C_QuestLog.GetSelectedQuest)
+        local title = id and SafeCall(C_QuestLog.GetTitleForQuestID, id)
+        if type(title) == "string" and title ~= "" then return title end
+    end
+    return nil
+end
+
+-- Extra knowledge base fields for the item in this tooltip, or nil
+local function DetectOrigin(tooltip)
+    local owner = tooltip.GetOwner and tooltip:GetOwner()
+    if not owner then return nil end
+    for _, name in ipairs(QUEST_FRAMES) do
+        local frame = _G[name]
+        if frame and IsInside(owner, frame) then return { quest = QuestTitle() or true } end
+    end
+    if TradeSkillFrame and IsInside(owner, TradeSkillFrame) then
+        local profession = SafeCall(GetTradeSkillLine)
+        return { profession = (type(profession) == "string" and profession ~= "") and profession or true }
+    end
     return nil
 end
 
@@ -235,10 +321,18 @@ local function AddHeader(tip, r)
     if r.reason then tip:AddLine(r.reason, 0.85, 0.85, 0.85, true) end
 
     local names = {}
-    for _, item in ipairs(current.replaced) do table.insert(names, item.link or item.name) end
+    local max = #current.replaced > 1 and MAX_PAIR_NAME or MAX_NAME
+    for _, item in ipairs(current.replaced) do table.insert(names, ItemText(item, max)) end
     local gr, gg, gb = Unpack(GREY)
     tip:AddDoubleLine("vs. " .. (#names > 0 and table.concat(names, " + ") or "empty slot"),
         ("%s %d"):format(ns.Spec.DisplayName(r.spec), r.level), gr, gg, gb, gr, gg, gb)
+    -- A one-hander or off hand against a two-hander: the partner it is
+    -- counted with
+    local p = not NO_SCORE[r.verdict] and current.partner
+    if p then
+        tip:AddLine(("with %s in the %s (%s)"):format(ItemText(p.item),
+            p.off and "off hand" or "main hand", p.where or "?"), gr, gg, gb)
+    end
 end
 
 -- The two other specs in one line
@@ -255,9 +349,18 @@ local function AddOtherSpecs(tip, r)
     tip:AddLine(table.concat(parts, "    "), Unpack(LIGHT))
 end
 
+-- "Agility +6 (+5%)": main stats also show the change against what your
+-- gear has of the stat
 local function StatText(c)
     local color = c.value > 0 and TONES.TAKE or c.value < 0 and TONES.DROP or GREY
-    return ns.ItemData.StatLabel(c.stat) .. " " .. Colored(color, Fmt(c.delta) .. (c.capped and " (cap)" or ""))
+    local text = Fmt(c.delta) .. (c.capped and " (cap)" or "")
+    if c.main and c.pct then
+        local pct = math.floor(c.pct + 0.5)
+        if pct ~= 0 and math.abs(pct) <= 999 then text = text .. (" (%s%d%%)"):format(pct > 0 and "+" or "", pct) end
+    end
+    local label = ns.ItemData.StatLabel(c.stat)
+    if c.main then label = Colored(WHITE, label) end
+    return label .. " " .. Colored(color, text)
 end
 
 -- Biggest stat changes for the current spec, two per line
@@ -322,6 +425,39 @@ local function AddSets(tip, r)
     end
 end
 
+-- While leveling: how long the item stays current against what it replaces,
+-- and what that adds to the score
+local function AddLongevity(tip, r)
+    local life = r.current.longevity
+    if NO_SCORE[r.verdict] or not life or math.abs(life.value) < 0.05 then return end
+    local text = ("Lasts to level %d"):format(life.lasts)
+    if life.yours then text = text .. (", yours to %d"):format(life.yours) end
+    local lr, lg, lb = Unpack(LIFE_COLOR)
+    local vr, vg, vb = Unpack(life.value >= 0 and TONES.TAKE or TONES.DROP)
+    tip:AddDoubleLine(text, Fmt(life.value), lr, lg, lb, vr, vg, vb)
+end
+
+-- How the item is obtained, as far as the knowledge base has seen it:
+-- "Source: Quest (The Defias Brotherhood), Vendor (Bob)"
+-- withDetail: "Quest (The Defias Brotherhood)" for the Source line; without:
+-- the tag ("quest") for the list
+local function OriginText(origin, withDetail)
+    local text = origin.tag
+    if withDetail then
+        text = ORIGIN_NAMES[origin.tag] or origin.tag
+        if origin.detail then text = text .. " (" .. ShortName(origin.detail, MAX_NAME) .. ")" end
+    end
+    return Colored(ORIGIN_COLORS[origin.tag] or LIGHT, text)
+end
+
+local function AddSource(tip, r)
+    local origins = ns.Compare.Origins(r.info)
+    if #origins == 0 then return end
+    local parts = {}
+    for i = 1, math.min(2, #origins) do parts[i] = OriginText(origins[i], true) end
+    tip:AddLine("Source: " .. table.concat(parts, ", "), 0.5, 0.5, 0.5, true)
+end
+
 -- Note, level band (while leveling) and manual spec in one grey line
 local function AddNotes(tip, r)
     local parts = {}
@@ -355,8 +491,20 @@ local function AddBestSeen(tip, r)
     for i = 1, math.min(settings.topCount, rank.total) do
         local e = rank.list[i]
         local isThis = (e.key == r.info.key)
-        local left = ("%s%d. %s"):format(isThis and "> " or "   ", i, e.entry.link or e.entry.name or "?")
-        local right = ("%d %s"):format(math.floor(e.score + 0.5), ns.Compare.WhereShort(e.entry, e.key))
+        local max = e.partner and MAX_PAIR_NAME or MAX_NAME
+        local left = ("%s%d. %s"):format(isThis and "> " or "   ", i, ItemText(e.entry, max))
+        if e.partner then left = left .. " + " .. ItemText(e.partner.item, max) end
+        -- Where you have it (worn, bags, bank) and how it is obtained
+        local where = ns.Compare.WhereShort(e.entry, e.key)
+        local origin = ns.Compare.Origins(e.entry)[1]
+        if origin then
+            if where == origin.tag then
+                where = OriginText(origin)
+            elseif ns.Compare.Location(e.entry, e.key) then
+                where = where .. " " .. OriginText(origin)
+            end
+        end
+        local right = ("%d %s"):format(math.floor(e.score + 0.5), where)
         local delta, verdict = ns.Compare.Improvement(e, r.spec)
         if delta then
             right = right .. "  " .. Colored(TONES[Tone(verdict)], Fmt(delta))
@@ -373,6 +521,8 @@ function VT:Render(owner, r)
     AddOtherSpecs(tip, r)
     AddStats(tip, r)
     AddSets(tip, r)
+    AddLongevity(tip, r)
+    AddSource(tip, r)
     AddNotes(tip, r)
     AddBestSeen(tip, r)
     tip:Show()
@@ -399,7 +549,7 @@ function VT:Update(tooltip)
     local link = GetTooltipLink(tooltip)
     if not link then return self:Hide(tooltip) end
 
-    ns.KB:Record(link, "tooltip")
+    ns.KB:Record(link, "tooltip", DetectOrigin(tooltip))
     local info = ns.ItemData.Parse(link)
     local result = info and ns.Compare.Evaluate(info, DetectContext(tooltip))
     if not result then return self:Hide(tooltip) end

@@ -17,13 +17,14 @@ ns:RegisterClass("WARLOCK", {
     dualWield = false,
     groupLabels = { ranged = "wands" },
 
+    -- mainExtra: Life Tap makes Stamina a main stat next to spell damage
     specs = {
         { key = "AFFLICTION", id = 355, retailIDs = { 265 }, name = "Affliction", short = "Affli", role = "Damage",
-          attack = "SPELL", icon = "Interface\\Icons\\Spell_Shadow_DeathCoil" },
+          attack = "SPELL", icon = "Interface\\Icons\\Spell_Shadow_DeathCoil", mainExtra = { "STAMINA" } },
         { key = "DEMONOLOGY", id = 354, retailIDs = { 266 }, name = "Demonology", short = "Demo", role = "Damage",
-          attack = "SPELL", icon = "Interface\\Icons\\Spell_Shadow_Metamorphosis" },
+          attack = "SPELL", icon = "Interface\\Icons\\Spell_Shadow_Metamorphosis", mainExtra = { "STAMINA" } },
         { key = "DESTRUCTION", id = 593, retailIDs = { 267 }, name = "Destruction", short = "Destro", role = "Damage",
-          attack = "SPELL", icon = "Interface\\Icons\\Spell_Shadow_RainOfFire" },
+          attack = "SPELL", icon = "Interface\\Icons\\Spell_Shadow_RainOfFire", mainExtra = { "STAMINA" } },
     },
     tabOrder = { "AFFLICTION", "DEMONOLOGY", "DESTRUCTION" },
     defaultSpec = "AFFLICTION",

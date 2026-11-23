@@ -8,7 +8,14 @@
 --   items[key] = { id, name, link, quality, ilvl, reqLevel, equipLoc, classID,
 --                  subclassID, sellPrice, icon, setID, stats,
 --                  firstSeen, lastSeen, seen, sources = { tooltip = n, loot = n, ... },
---                  buyPrice, vendor, zone }
+--                  buyPrice, vendor, zone,
+--                  quest, instance, instanceType, profession }
+--
+-- How an item is obtained (Compare.Origins): vendor (merchant window), quest
+-- (quest reward; the title, or true if unknown), instance + instanceType
+-- ("party" dungeon or "raid": looted, rolled on or looted by the group
+-- there), profession (seen in a profession window), zone (looted outside
+-- an instance).
 --
 -- What this character carries is stored per character
 -- (WOWClassHelperCharDB.owned = { bags = { [key] = count }, bank = { [key] = count } }).
@@ -84,7 +91,10 @@ function KB:Record(link, source, extra, isRetry)
     entry.lastSource = source
 
     if extra then
-        for k, v in pairs(extra) do entry[k] = v end
+        -- true means "known, details unknown" and never replaces a detail
+        for k, v in pairs(extra) do
+            if v ~= true or entry[k] == nil then entry[k] = v end
+        end
     end
     return entry
 end
@@ -185,11 +195,69 @@ function KB:ScanEquipped()
     end
 end
 
+local function SafeCall(func, ...)
+    if type(func) ~= "function" then return nil end
+    local ok, a, b, c = pcall(func, ...)
+    if not ok then return nil end
+    return a, b, c
+end
+
+-- { instance, instanceType } inside a dungeon or raid, else nil
+local function InstanceExtra()
+    local inInstance, instanceType = SafeCall(IsInInstance)
+    if not inInstance or (instanceType ~= "party" and instanceType ~= "raid") then return nil end
+    local name = SafeCall(GetInstanceInfo)
+    if type(name) ~= "string" or name == "" then name = SafeCall(GetRealZoneText) end
+    return { instance = name, instanceType = instanceType }
+end
+
 function KB:ScanLoot()
-    local zone = GetRealZoneText and GetRealZoneText() or nil
+    local extra = InstanceExtra() or {}
+    extra.zone = SafeCall(GetRealZoneText)
     for i = 1, (GetNumLootItems() or 0) do
         local link = GetLootSlotLink(i)
-        if link then self:Record(link, "loot", { zone = zone }) end
+        if link then self:Record(link, "loot", extra) end
+    end
+end
+
+-- Group loot roll in a dungeon or raid
+function KB:ScanLootRoll(rollID)
+    local link = SafeCall(GetLootRollItemLink, rollID)
+    if link then self:Record(link, "loot", InstanceExtra()) end
+end
+
+-- Quest rewards in the quest dialog (accepting or turning in)
+function KB:ScanQuestRewards()
+    local title = SafeCall(GetTitleText)
+    local extra = { quest = (type(title) == "string" and title ~= "") and title or true }
+    for _, kind in ipairs({ "choice", "reward" }) do
+        local count = SafeCall(kind == "choice" and GetNumQuestChoices or GetNumQuestRewards) or 0
+        for i = 1, count do
+            local link = SafeCall(GetQuestItemLink, kind, i)
+            if link then self:Record(link, "quest", extra) end
+        end
+    end
+end
+
+-- Gear in an open profession window (crafted items). Only equippable
+-- items are recorded; the window updates often, so at most every 2 sec.
+local TRADE_SKILL_INTERVAL = 2
+function KB:ScanTradeSkill(force)
+    if type(GetNumTradeSkills) ~= "function" or type(GetTradeSkillItemLink) ~= "function" then return end
+    local now = GetTime and GetTime() or 0
+    if not force and self.lastTradeScan and now - self.lastTradeScan < TRADE_SKILL_INTERVAL then return end
+    self.lastTradeScan = now
+    local profession = SafeCall(GetTradeSkillLine)
+    local extra = { profession = (type(profession) == "string" and profession ~= "") and profession or true }
+    for i = 1, (SafeCall(GetNumTradeSkills) or 0) do
+        local _, kind = SafeCall(GetTradeSkillInfo, i)
+        if kind ~= "header" then
+            local link = SafeCall(GetTradeSkillItemLink, i)
+            local info = link and ns.ItemData.Parse(link)
+            if info and info.equipLoc ~= "" and info.equipLoc ~= "INVTYPE_NON_EQUIP_IGNORE" then
+                self:Record(link, "craft", extra)
+            end
+        end
     end
 end
 
@@ -214,9 +282,11 @@ function KB:ScanMerchant()
     end
 end
 
+-- Loot messages; inside a dungeon or raid they mark the item as from there
 function KB:ScanChat(msg)
+    local extra = InstanceExtra()
     for itemString in msg:gmatch("item:[%-%d:]+") do
-        self:Record(itemString, "chat")
+        self:Record(itemString, "chat", extra)
     end
 end
 
@@ -225,11 +295,16 @@ function KB:OnEnable()
     for _, event in ipairs({
         "PLAYER_ENTERING_WORLD", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED",
         "LOOT_READY", "MERCHANT_SHOW", "BANKFRAME_OPENED", "CHAT_MSG_LOOT",
+        "START_LOOT_ROLL", "QUEST_DETAIL", "QUEST_COMPLETE", "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE",
     }) do
         pcall(events.RegisterEvent, events, event)
     end
 
     events:SetScript("OnEvent", function(_, event, arg1)
+        if event == "START_LOOT_ROLL" then return self:ScanLootRoll(arg1) end
+        if event == "QUEST_DETAIL" or event == "QUEST_COMPLETE" then return self:ScanQuestRewards() end
+        if event == "TRADE_SKILL_SHOW" then return self:ScanTradeSkill(true) end
+        if event == "TRADE_SKILL_UPDATE" then return self:ScanTradeSkill() end
         if event == "PLAYER_ENTERING_WORLD" then
             self:ScanBags()
             self:ScanEquipped()

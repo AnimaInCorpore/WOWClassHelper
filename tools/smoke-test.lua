@@ -117,6 +117,11 @@ local function ResetWorld(opts)
         meleeHit = opts.meleeHit or 0,         -- GetHitModifier
         defenseBonus = opts.defenseBonus or 0, -- UnitDefense bonus
         mana = 3000, manaMax = 4000,
+        instanceType = nil,                  -- "party" / "raid" inside an instance
+        instanceName = nil,
+        questTitle = nil, questChoices = {}, questRewards = {},   -- quest dialog
+        rolls = {},                          -- group loot rolls: rollID -> link
+        trade = {}, tradeLine = nil,         -- profession window: { name, kind, link }
         frames = {},
         postCalls = {},
         lastMenu = nil,
@@ -190,6 +195,24 @@ AddItem(90213, { name = "Test Healer Necklace", quality = 2, ilvl = 30, reqLevel
 AddItem(90214, { name = "Test Hand Axe", quality = 2, ilvl = 30, reqLevel = 25, class = 2, subclass = 0, slot = "WEAPON", stats = { AGILITY = 5, STRENGTH = 3 }, weapon = { min = 40, max = 58, speed = 2.6 } })
 AddItem(90215, { name = "Test Throwing Knives", quality = 2, ilvl = 30, reqLevel = 25, class = 2, subclass = 16, slot = "THROWN", stats = {}, weapon = { min = 20, max = 30, speed = 2 } })
 AddItem(90216, { name = "Test Hunter Spaulders", quality = 2, ilvl = 30, reqLevel = 25, class = 4, subclass = 2, slot = "SHOULDER", stats = { AGILITY = 6, INTELLECT = 6, STAMINA = 4 }, armor = 80 })
+-- Two-hander against one-hander + off hand
+AddItem(90301, { name = "Test Caster Staff", quality = 2, ilvl = 40, reqLevel = 0, class = 2, subclass = 10, slot = "TWOHWEAPON", stats = { INTELLECT = 10, SPIRIT = 10 }, weapon = { min = 60, max = 90, speed = 3 } })
+AddItem(90302, { name = "Test Caster Mace", quality = 2, ilvl = 40, reqLevel = 0, class = 2, subclass = 4, slot = "WEAPONMAINHAND", stats = { INTELLECT = 8, SPIRIT = 6 }, weapon = { min = 30, max = 50, speed = 2.5 } })
+AddItem(90303, { name = "Test Caster Orb", quality = 2, ilvl = 40, reqLevel = 0, class = 4, subclass = 0, slot = "HOLDABLE", stats = { INTELLECT = 6, SPIRIT = 6 } })
+-- Longevity, main stats, long names, sources
+AddItem(90401, { name = "Test Blue Old Cap", quality = 3, ilvl = 25, reqLevel = 20, class = 4, subclass = 1, slot = "HEAD", stats = { INTELLECT = 12, SPIRIT = 10 }, armor = 30 })
+AddItem(90402, { name = "Test Green Level Cap", quality = 2, ilvl = 34, reqLevel = 29, class = 4, subclass = 1, slot = "HEAD", stats = { INTELLECT = 11, SPIRIT = 9 }, armor = 30 })
+AddItem(90403, { name = "Test Blue Level Cap", quality = 3, ilvl = 34, reqLevel = 29, class = 4, subclass = 1, slot = "HEAD", stats = { INTELLECT = 11, SPIRIT = 9 }, armor = 30 })
+AddItem(90404, { name = "Test Agile Hood", quality = 2, ilvl = 60, reqLevel = 0, class = 4, subclass = 2, slot = "HEAD", stats = { AGILITY = 10 }, armor = 100 })
+AddItem(90405, { name = "Test Sturdy Hood", quality = 2, ilvl = 60, reqLevel = 0, class = 4, subclass = 2, slot = "HEAD", stats = { AGILITY = 6, STAMINA = 25 }, armor = 100 })
+AddItem(90406, { name = "Test Überlänge Kopfschutz des Gebirgskönigs", quality = 2, ilvl = 60, reqLevel = 0, class = 4, subclass = 1, slot = "HEAD", stats = { INTELLECT = 20, SPIRIT = 20 }, armor = 40 })
+AddItem(90407, { name = "Test Quest Reward Gloves", quality = 2, ilvl = 30, reqLevel = 25, class = 4, subclass = 1, slot = "HAND", stats = { INTELLECT = 5 }, armor = 20 })
+AddItem(90408, { name = "Test Dungeon Boots", quality = 3, ilvl = 30, reqLevel = 25, class = 4, subclass = 1, slot = "FEET", stats = { INTELLECT = 6 }, armor = 20 })
+AddItem(90409, { name = "Test Raid Bracers", quality = 4, ilvl = 70, reqLevel = 60, class = 4, subclass = 1, slot = "WRIST", stats = { INTELLECT = 9 }, armor = 20 })
+AddItem(90410, { name = "Test Tailored Belt", quality = 2, ilvl = 30, reqLevel = 25, class = 4, subclass = 1, slot = "WAIST", stats = { INTELLECT = 4 }, armor = 15 })
+AddItem(90411, { name = "Test Erstaunlich langer Streitkolben der Weisheit", quality = 2, ilvl = 40, reqLevel = 0, class = 2, subclass = 4, slot = "WEAPONMAINHAND", stats = { INTELLECT = 8, SPIRIT = 6 }, weapon = { min = 30, max = 50, speed = 2.5 } })
+AddItem(90412, { name = "Test Kugel des unendlich tiefen Sternenhimmels", quality = 2, ilvl = 40, reqLevel = 0, class = 4, subclass = 0, slot = "HOLDABLE", stats = { INTELLECT = 6, SPIRIT = 6 } })
+AddItem(90304, { name = "Test Parrying Dagger", quality = 2, ilvl = 30, reqLevel = 0, class = 2, subclass = 15, slot = "WEAPONOFFHAND", stats = { AGILITY = 4 }, weapon = { min = 30, max = 50, speed = 1.8 } })
 
 local SLOT_TO_LOC = { TWOHWEAPON = "INVTYPE_2HWEAPON" }
 
@@ -255,6 +278,7 @@ for _, e in ipairs({
     "UNIT_STATS", "GET_ITEM_INFO_RECEIVED", "BAG_UPDATE_DELAYED", "LOOT_READY", "MERCHANT_SHOW",
     "BANKFRAME_OPENED", "CHAT_MSG_LOOT", "UNIT_POWER_UPDATE", "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER",
     "UNIT_SPELLCAST_SUCCEEDED", "UNIT_DISPLAYPOWER", "SPELLS_CHANGED", "TRAIT_CONFIG_UPDATED",
+    "START_LOOT_ROLL", "QUEST_DETAIL", "QUEST_COMPLETE", "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE",
 }) do KNOWN_EVENTS[e] = true end
 
 local KNOWN_SCRIPTS = {}
@@ -588,6 +612,20 @@ local function InstallAPI(missing)
             return list and list[slot]
         end,
     }
+    g.IsInInstance = function()
+        if W.instanceType then return true, W.instanceType end
+        return false, "none"
+    end
+    g.GetInstanceInfo = function() return W.instanceType and W.instanceName or "Eastern Kingdoms" end
+    g.GetTitleText = function() return W.questTitle end
+    g.GetNumQuestChoices = function() return #W.questChoices end
+    g.GetNumQuestRewards = function() return #W.questRewards end
+    g.GetQuestItemLink = function(kind, i) return (kind == "choice" and W.questChoices or W.questRewards)[i] end
+    g.GetLootRollItemLink = function(id) return W.rolls[id] end
+    g.GetNumTradeSkills = function() return #W.trade end
+    g.GetTradeSkillInfo = function(i) local t = W.trade[i]; if t then return t.name, t.kind end end
+    g.GetTradeSkillItemLink = function(i) local t = W.trade[i]; return t and t.link end
+    g.GetTradeSkillLine = function() return W.tradeLine, 150, 300 end
     g.GetNumLootItems = function() return #W.loot end
     g.GetLootSlotLink = function(i) return W.loot[i] end
     g.GetMerchantNumItems = function() return #W.merchant end
@@ -1144,7 +1182,7 @@ test("Priest: verdicts at level 60", function()
     eq(Evaluate(ns, 22514, "LOOT").action, "Take & equip", "action when looting")
     r = Evaluate(ns, 90001)
     eq(r.verdict, "UNUSABLE", "leather unusable")
-    eq(r.action, "Can't use - sell", "unusable action")
+    eq(r.action, "Can't use - do not take/sell", "unusable action")
     eq(Evaluate(ns, 22080).verdict, "EQUIPPED", "equipped item")
     eq(Evaluate(ns, 22080).action, "Currently equipped", "equipped action")
     -- Off-spec: the Shadow tome is worse for Holy, better for Shadow
@@ -1258,7 +1296,7 @@ test("Priest: verdict tooltip on hover", function()
     check(vs and vs:find("[Virtuous Crown]", 1, true) and vs:find("|| Holy 60$"), "compared item, spec and level")
     check(HasLine(lines, "Disc ") and HasLine(lines, "Shadow ") and not HasLine(lines, "Discipline"),
         "other specs in one short line")
-    local stats = HasLine(lines, "Healing ")
+    local stats = HasPlain(lines, "Healing ")
     check(stats and stats:find(" || "), "two stat changes per line")
     check(HasLine(lines, "Vestments of Faith 1/9 with this, bonus at 2"), "set progress line")
     check(not HasLine(lines, "Vestments of the Virtuous"), "set change without effect hidden")
@@ -1281,7 +1319,7 @@ test("Priest: verdict tooltip on hover", function()
     check(HasLine(lines, "Fills an empty slot") and HasLine(lines, "Equip now"), "ItemRefTooltip works")
     -- Unusable: action only, no stat or set lines
     lines = Hover(ns, Link(90001))
-    check(HasLine(lines, "Can't use - sell") and not HasLine(lines, "Agility"), "unusable item has no stat lines")
+    check(HasLine(lines, "Can't use - do not take/sell") and not HasPlain(lines, "Agility"), "unusable item has no stat lines")
     -- Near-worthless replaced item: no silly percentage
     Equip(11, 90012)
     Equip(12, 90012)
@@ -1765,7 +1803,7 @@ test("Paladin: verdict tooltips at level 60", function()
         "dagger: never usable, not 'skill not learned'")
     check(HasLine(Hover(ns, Link(90123)), "Keep for level 99"), "level 99 item")
     check(HasLine(Hover(ns, Link(90116)), "Currently equipped"), "equipped item")
-    check(HasLine(Hover(ns, Link(90129)), "Sell"), "worse item")
+    check(HasLine(Hover(ns, Link(90129)), "Do not take/sell"), "worse item")
     check(HasLine(Hover(ns, Link(90130)), "Equal"), "identical item")
     check(HasLine(Hover(ns, Link(90124)), "Keep for Tank"), "shield: tank upgrade")
     check(HasLine(Hover(ns, Link(90122)), "Keep for Healer"), "cloth healer robe")
@@ -2044,7 +2082,7 @@ test("dual wield, ranged weapons and Feral weapon DPS", function()
     -- Nothing on the item counts for the spec: sell it, it isn't "equal"
     r = Evaluate(ns, 90213)   -- healer necklace into an empty neck slot
     eq(r.verdict, "NO", "healer necklace for a Rogue")
-    eq(r.action, "Sell", "sell it")
+    eq(r.action, "Do not take/sell", "do not take or sell it")
     -- Priests don't dual wield
     ns = LoadAddon({ class = "PRIEST" })
     W.equipped[16] = Link(90004)
@@ -2068,6 +2106,312 @@ test("dual wield, ranged weapons and Feral weapon DPS", function()
     eq(ns.Weights.Get("BALANCE").WAND_DPS, nil, "Druids have no wand")
     -- Survival Hunters are scored as melee
     check(ns.Classes.HUNTER.specs[3].attack == "MELEE", "Survival is a melee spec")
+end)
+
+test("two-handers against a one-hander and an off hand", function()
+    ns = LoadAddon({ specIndex = 2 })   -- Holy Priest, level 60
+    W.equipped[16] = Link(90301)        -- caster staff
+    Boot(ns)
+    local w = ns.Weights.Get("HOLY")
+    local function Raw(id, off, spec)
+        return ns.Compare.RawScore(ns.ItemData.Parse(Link(id)).stats, spec or "HOLY", w, off)
+    end
+    local staff, mace, orb = Raw(90301), Raw(90302), Raw(90303)
+    check(mace < staff and mace + orb > staff, "test items: the mace alone loses, mace + orb wins")
+
+    -- Nothing to pair with: the mace alone against the staff
+    local r = Evaluate(ns, 90302)
+    eq(r.current.partner, nil, "no partner without an off hand in the bags")
+    eq(r.current.note, "Replaces your staff (off hand becomes free)", "mace alone vs. staff")
+    eq(r.roles.HOLY.verdict, "NO", "the mace alone is worse than the staff")
+    -- An orb in the bags: the mace counts together with it
+    W.bags[0] = { Link(90303) }
+    FireEvent("BAG_UPDATE_DELAYED")
+    r = Evaluate(ns, 90302)
+    local p = r.current.partner
+    check(p and p.item.id == 90303 and p.off == true and p.where == "bags", "orb from the bags in the off hand")
+    eq(#r.current.replaced, 1, "the pair replaces the staff only")
+    eq(r.current.replaced[1].id, 90301, "replaced: the staff")
+    near(r.current.score, mace + orb - staff, "pair score = mace + orb - staff")
+    eq(r.roles.HOLY.verdict, "UPGRADE", "mace + orb beats the staff")
+    eq(r.action, "Equip now", "action for the pair")
+    eq(r.current.note, nil, "no 'off hand becomes free' note")
+    local lines = Hover(ns, Link(90302))
+    check(HasPlain(lines, "with [Test Caster Orb] in the off hand (bags)"), "tooltip names the partner")
+    check(HasPlain(lines, "vs. [Test Caster Staff]"), "tooltip: against the staff")
+    -- The orb counts with the best main hand from the bags
+    r = Evaluate(ns, 90303)
+    eq(r.current.partner, nil, "no main hand in the bags yet")
+    eq(r.current.note, "Needs a one-handed weapon - compared against your staff", "orb alone vs. staff")
+    W.bags[0] = { Link(90303), Link(90302) }
+    FireEvent("BAG_UPDATE_DELAYED")
+    r = Evaluate(ns, 90303)
+    p = r.current.partner
+    check(p and p.item.id == 90302 and p.off == false, "mace from the bags in the main hand")
+    near(r.current.score, mace + orb - staff, "same pair, same score")
+    -- Never paired with itself; items the class can't use aren't partners
+    W.bags[0] = { Link(90302), Link(90124) }   -- mace, tower shield (Priests can't use shields)
+    FireEvent("BAG_UPDATE_DELAYED")
+    eq(Evaluate(ns, 90302).current.partner, nil, "no partner from the mace itself or a shield")
+    -- Bank items count too
+    W.bags[0] = {}
+    FireEvent("BAG_UPDATE_DELAYED")
+    W.bank[-1] = { Link(90303) }
+    FireEvent("BANKFRAME_OPENED")
+    p = Evaluate(ns, 90302).current.partner
+    check(p and p.item.id == 90303 and p.where == "bank", "partner from the bank")
+
+    -- The other way round: a two-hander against the worn pair
+    Equip(16, 90302)
+    Equip(17, 90303)
+    r = Evaluate(ns, 90301)
+    eq(#r.current.replaced, 2, "staff replaces both hands")
+    near(r.current.score, staff - mace - orb, "staff vs. the pair")
+    eq(r.roles.HOLY.verdict, "NO", "the staff is worse than mace + orb")
+
+    -- Weapons list: the mace is ranked together with the orb, above the staff
+    Equip(16, 90301)
+    Equip(17, nil)
+    W.bags[0] = { Link(90302), Link(90303) }
+    FireEvent("BAG_UPDATE_DELAYED")
+    W.bank[-1] = {}
+    FireEvent("BANKFRAME_OPENED")
+    local list = ns.Compare.Ranking("mainhand", "HOLY")
+    eq(list[1] and list[1].key, "90302", "mace (with orb) ranks first")
+    near(list[1].score, mace + orb, "pair score in the list")
+    eq(list[1].partner and list[1].partner.item.id, 90303, "orb as the mace's partner")
+    near(ns.Compare.Improvement(list[1], "HOLY"), mace + orb - staff, "pair improvement over the staff")
+    eq(list[2] and list[2].key, "90301", "staff second")
+    eq(list[2].partner, nil, "a two-hander stands alone")
+    local rows = ListRows(Hover(ns, Link(90301)))
+    check(rows[1] and Plain(rows[1]):find("1. [Test Caster Mace] + [Test Caster Orb]", 1, true),
+        "list row shows the pair: " .. tostring(rows[1] and Plain(rows[1])))
+    check(rows[2] and Plain(rows[2]):find("> 2. [Test Caster Staff]", 1, true), "hovered staff marked #2")
+    -- A worn one-hander is listed with the worn off hand
+    Equip(16, 90302)
+    Equip(17, 90303)
+    list = ns.Compare.Ranking("mainhand", "HOLY")
+    eq(list[1].partner and list[1].partner.where, "worn", "worn pair")
+    eq(ns.Compare.Improvement(list[1], "HOLY"), nil, "no improvement for the worn pair")
+    -- /wch best shows the pair
+    Slash("best weapon")
+    local shown
+    for _, line in ipairs(printed) do
+        if Plain(line):find("[Test Caster Mace] + [Test Caster Orb]", 1, true) then shown = line end
+    end
+    check(shown and Plain(shown):find("off hand equipped", 1, true), "/wch best lists the pair: " .. tostring(shown))
+
+    -- Dual wield: against a two-hander, a one-hander pairs with another
+    -- one-hander whose DPS counts half in the off hand
+    ns = LoadAddon({ class = "WARRIOR", level = 30 })
+    W.equipped[16] = Link(90207)   -- greataxe
+    W.bags[0] = { Link(90206) }    -- claw
+    Boot(ns)
+    local spec = ns.Spec.Get()
+    w = ns.Weights.Get(spec)
+    local axe = Raw(90207, false, spec)
+    r = Evaluate(ns, 90125)        -- Blade of Justice, the faster-hitting main hand
+    p = r.current.partner
+    check(p and p.item.id == 90206 and p.off == true, "claw in the off hand")
+    local function StatScore(role) return role.score - (role.longevity and role.longevity.value or 0) end
+    near(StatScore(r.current), Raw(90125, false, spec) + Raw(90206, true, spec) - axe, "off-hand DPS counts half in the pair")
+    -- Off-hand-only weapon against a two-hander: the two-hander's DPS counts in full
+    W.bags[0] = {}
+    FireEvent("BAG_UPDATE_DELAYED")
+    r = Evaluate(ns, 90304)
+    eq(r.current.note, "Needs a one-handed weapon - compared against your two-hander", "dagger alone vs. greataxe")
+    near(StatScore(r.current), Raw(90304, true, spec) - axe, "only the dagger's DPS counts half")
+    W.bags[0] = { Link(90125) }
+    FireEvent("BAG_UPDATE_DELAYED")
+    p = Evaluate(ns, 90304).current.partner
+    check(p and p.item.id == 90125 and p.off == false, "dagger pairs with the sword from the bags")
+end)
+
+test("longevity while leveling", function()
+    ns = LoadAddon({ specIndex = 2, level = 30 })   -- Holy Priest
+    W.equipped[1] = Link(90401)                     -- blue cap, required level 20
+    Boot(ns)
+    local w = ns.Weights.Get("HOLY")
+    local function Raw(id) return ns.Compare.RawScore(ns.ItemData.Parse(Link(id)).stats, "HOLY", w) end
+    local function Lasts(id) return ns.Compare.LastsTo(ns.ItemData.Parse(Link(id))) end
+    check(Raw(90401) > Raw(90402), "test items: the old blue cap has better stats")
+    eq(Lasts(90401), 31, "blue from level 20 lasts to 31")
+    eq(Lasts(90402), 36, "green from level 29 lasts to 36")
+    eq(Lasts(90403), 40, "blue from level 29 lasts longer: to 40")
+    eq(ns.Compare.LastsTo({ reqLevel = 0, ilvl = 30, quality = 2 }), 32, "no required level: from the item level")
+    -- The green cap in your level range beats the old blue one
+    local r = Evaluate(ns, 90402)
+    check(r.current.longevity and r.current.longevity.value > 0, "longevity counts for the green cap")
+    check(r.current.score - r.current.longevity.value < 0, "its stats alone are worse")
+    eq(r.verdict, "UPGRADE", "but it lasts longer: upgrade")
+    eq(r.current.mainLoss, false, "main stats over their lifetime aren't lost")
+    local lines = Hover(ns, Link(90402))
+    check(HasPlain(lines, "Lasts to level 36, yours to 31 || +"), "longevity line: " .. tostring(HasPlain(lines, "Lasts")))
+    -- The other way round: the old blue cap isn't worth taking
+    Equip(1, 90402)
+    r = Evaluate(ns, 90401)
+    eq(r.verdict, "NO", "old blue cap against the green one in your level range")
+    eq(r.action, "Do not take/sell", "action")
+    -- Same level and stats: the blue one lasts longer
+    r = Evaluate(ns, 90403)
+    near(r.current.score - r.current.longevity.value, 0, "same stats")
+    eq(r.verdict, "UPGRADE", "blue outlasts green")
+    -- The list ranks by longevity too
+    Hover(ns, Link(90401))
+    Hover(ns, Link(90403))
+    local order = {}
+    for i, e in ipairs(ns.Compare.Ranking("head", "HOLY")) do order[e.key] = i end
+    check(order["90403"] < order["90402"] and order["90402"] < order["90401"],
+        ("list order: blue level cap, green level cap, old blue cap (%s, %s, %s)"):format(
+        tostring(order["90403"]), tostring(order["90402"]), tostring(order["90401"])))
+    -- At max level longevity doesn't count
+    ns = LoadAddon({ specIndex = 2 })
+    W.equipped[1] = Link(90401)
+    Boot(ns)
+    r = Evaluate(ns, 90402)
+    eq(r.current.longevity, nil, "no longevity at max level")
+    check(not HasPlain(Hover(ns, Link(90402)), "Lasts to"), "no longevity line at max level")
+end)
+
+test("main stats lead", function()
+    ns = LoadAddon({ class = "ROGUE" })   -- level 60: no longevity
+    W.equipped[1] = Link(90404)           -- agile hood
+    Boot(ns)
+    local r = Evaluate(ns, 90405)         -- sturdy hood: less Agility, lots of Stamina
+    check(r.current.score > 1, "by the weights alone the sturdy hood scores higher: " .. tostring(r.current.score))
+    check(r.current.mainLoss, "but it loses Agility")
+    eq(r.verdict, "SIDEGRADE", "losing main stats: at best equal")
+    eq(r.reason, "Loses main stats: Agility -4", "reason")
+    local lines = Hover(ns, Link(90405))
+    check(HasPlain(lines, "Agility -4 (-40%) || Stamina +25"),
+        "main stat first, with the change against your gear: " .. tostring(HasPlain(lines, "Agility")))
+    check(HasLine(lines, "|cffffffffAgility|r"), "main stat label highlighted")
+    -- The other way round the hood with more Agility is an upgrade
+    Equip(1, 90405)
+    eq(Evaluate(ns, 90404).current.mainLoss, false, "gains main stats")
+    -- Lists use the same rule
+    Hover(ns, Link(90404))
+    Equip(1, 90404)
+    for _, e in ipairs(ns.Compare.Ranking("head", ns.Spec.Get())) do
+        if e.key == "90405" then
+            local _, verdict = ns.Compare.Improvement(e, ns.Spec.Get())
+            eq(verdict, "SIDEGRADE", "list: the sturdy hood is no upgrade")
+        end
+    end
+    -- Main stats per role: Stamina for tanks and Warlocks, Healing for healers
+    ns = Boot(LoadAddon({ class = "WARRIOR" }))
+    check(ns.Weights.IsMainStat("PROTECTION", "STAMINA") and not ns.Weights.IsMainStat("ARMS", "STAMINA"), "Warrior tank: Stamina")
+    check(ns.Weights.IsMainStat("ARMS", "STRENGTH") and ns.Weights.IsMainStat("ARMS", "DPS"), "Arms: Strength and weapon DPS")
+    check(ns.Weights.IsMainStat("FURY", "STRENGTH_AGILITY_INTELLECT"), "combined primary stat key")
+    ns = Boot(LoadAddon({ class = "WARLOCK" }))
+    check(ns.Weights.IsMainStat("AFFLICTION", "STAMINA") and ns.Weights.IsMainStat("AFFLICTION", "SHADOW_DAMAGE"), "Warlock: Stamina and Shadow damage")
+    ns = Boot(LoadAddon({ class = "PRIEST" }))
+    check(ns.Weights.IsMainStat("HOLY", "HEALING") and not ns.Weights.IsMainStat("HOLY", "STAMINA"), "Holy: Healing, not Stamina")
+    ns = Boot(LoadAddon({ class = "HUNTER" }))
+    check(ns.Weights.IsMainStat("MARKSMANSHIP", "RANGED_DPS") and ns.Weights.IsMainStat("SURVIVAL", "DPS"), "Hunter: ranged, Survival melee")
+end)
+
+test("long item names", function()
+    ns = LoadAddon({ specIndex = 2 })
+    W.equipped[1] = Link(90013)           -- Test Silk Cap
+    Boot(ns)
+    eq(Evaluate(ns, 90406).verdict, "UPGRADE", "compared like any other item")
+    local lines = Hover(ns, Link(90406))
+    check(HasPlain(lines, "vs. [Test Silk Cap]"), "short names stay as they are")
+    local _, marked = ListRows(lines)
+    local cut = "[Test Überlänge Kopfschutz des...]"   -- 29 characters (two umlauts), then "..."
+    check(marked and Plain(marked):find(cut, 1, true), "long name cut on a character boundary: " .. tostring(marked and Plain(marked)))
+    -- Wear it: the "vs." line and the list cut it too, no line grows wide
+    Equip(1, 90406)
+    lines = Hover(ns, Link(90013))
+    check(HasPlain(lines, "vs. " .. cut), "vs. line with the cut name")
+    for _, line in ipairs(lines) do
+        local text = Plain(line)
+        if not text:find("^Not counted") and not text:find("^Source") then
+            check(#text <= 75, "line stays short: " .. text)
+        end
+    end
+    -- Chat has room: the full name
+    Slash("best head")
+    check(Printed("Test Überlänge Kopfschutz des Gebirgskönigs"), "full name in /wch best")
+    -- Pairs with two long names
+    Equip(16, 90301)                      -- staff
+    W.bags[0] = { Link(90411), Link(90412) }
+    FireEvent("BAG_UPDATE_DELAYED")
+    lines = Hover(ns, Link(90411))
+    eq(Evaluate(ns, 90411).current.partner.item.id, 90412, "pair found with long names")
+    check(HasPlain(lines, "with [Test Kugel des unendlich tief...] in the off hand (bags)"), "partner line cut to 30")
+    local rows = ListRows(lines)
+    check(rows[1] and Plain(rows[1]):find("[Test Erstaunlich la...] + [Test Kugel des unen...]", 1, true),
+        "pair row: both names cut to 20: " .. tostring(rows[1] and Plain(rows[1])))
+end)
+
+test("item sources: quest, dungeon, raid, crafted, vendor, drop", function()
+    ns = Boot(LoadAddon({ specIndex = 2 }))
+    local KB = ns.KB
+    -- Quest dialog: rewards are recorded with the quest title
+    W.questTitle = "The Defias Brotherhood"
+    W.questChoices = { Link(90407) }
+    FireEvent("QUEST_DETAIL")
+    eq(KB:Get("90407") and KB:Get("90407").quest, "The Defias Brotherhood", "quest reward recorded")
+    local lines = Hover(ns, Link(90407))
+    check(HasPlain(lines, "Source: Quest (The Defias Brotherhood)"), "source line: " .. tostring(HasPlain(lines, "Source")))
+    -- Hovered in the quest log without a known title: the title stays
+    local questLog = CreateFrame("Frame", "QuestLogFrame", UIParent)
+    local button = CreateFrame("Button", "QuestLogItem1", questLog)
+    Hover(ns, Link(90407), button)
+    eq(KB:Get("90407").quest, "The Defias Brotherhood", "a known quest title isn't replaced")
+    Hover(ns, Link(90012), button)
+    eq(KB:Get("90012").quest, true, "quest log reward without a title")
+    check(HasPlain(Hover(ns, Link(90012), button), "Source: Quest"), "source line without a title")
+    QuestLogFrame = nil
+    -- Dungeon loot
+    W.instanceType, W.instanceName = "party", "The Deadmines"
+    W.loot = { Link(90408) }
+    FireEvent("LOOT_READY")
+    local e = KB:Get("90408")
+    check(e and e.instanceType == "party" and e.instance == "The Deadmines", "dungeon loot")
+    -- Raid: loot roll and the group's loot messages
+    W.instanceType, W.instanceName = "raid", "Molten Core"
+    W.rolls = { [7] = Link(90409) }
+    FireEvent("START_LOOT_ROLL", 7, 60)
+    e = KB:Get("90409")
+    check(e and e.instanceType == "raid" and e.instance == "Molten Core", "raid loot roll")
+    FireEvent("CHAT_MSG_LOOT", "Someone receives loot: " .. Link(90016) .. ".")
+    eq(KB:Get("90016").instance, "Molten Core", "group loot message in the raid")
+    W.instanceType = nil
+    -- Profession window: equippable items only
+    W.tradeLine = "Tailoring"
+    W.trade = {
+        { name = "Belts", kind = "header" },
+        { name = "Tailored Belt", kind = "easy", link = Link(90410) },
+        { name = "Bolt of Linen", kind = "trivial", link = Link(90020) },
+    }
+    FireEvent("TRADE_SKILL_SHOW")
+    eq(KB:Get("90410") and KB:Get("90410").profession, "Tailoring", "crafted item recorded")
+    eq(KB:Get("90020"), nil, "trade goods aren't recorded")
+    -- World drop and vendor
+    W.loot = { Link(90011) }
+    FireEvent("LOOT_READY")
+    W.merchant = { { link = Link(90014), price = 100 } }
+    FireEvent("MERCHANT_SHOW")
+    local function Tag(key) local o = ns.Compare.Origins(KB:Get(key))[1]; return o and o.tag end
+    eq(Tag("90407"), "quest", "quest tag")
+    eq(Tag("90408"), "dungeon", "dungeon tag")
+    eq(Tag("90409"), "raid", "raid tag")
+    eq(Tag("90410"), "crafted", "crafted tag")
+    eq(Tag("90011"), "drop", "world drop tag")
+    eq(Tag("90014"), "vendor", "vendor tag")
+    eq(Tag("90013"), nil, "no source known")
+    -- The list shows where you have it and how it is obtained
+    W.bags[0] = { Link(90407) }
+    FireEvent("BAG_UPDATE_DELAYED")
+    local rows = ListRows(Hover(ns, Link(90407)))
+    check(HasPlain(rows, "bags quest"), "list: in bags, from a quest: " .. tostring(rows[1] and Plain(rows[1])))
+    eq(ns.Compare.WhereShort(KB:Get("90408"), "90408"), "dungeon", "not owned: the source")
+    -- /wch best names the source
+    Slash("best hands")
+    check(Printed("in bags; quest: The Defias Brotherhood"), "/wch best with the source")
 end)
 
 test("talents change the new classes' weights", function()

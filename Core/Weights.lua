@@ -158,6 +158,7 @@ Weights.READ_RATINGS = { "CR_DEFENSE_SKILL", "CR_DODGE", "CR_PARRY", "CR_BLOCK" 
 
 local profile = {}
 local cache = {}
+local mainCache = {}   -- spec -> set of main stats, see Weights.MainStats
 
 local function Merge(a, b)
     local t = {}
@@ -178,6 +179,7 @@ function Weights.Select(class)
     Weights.SET_EFFECT_TEXTS = profile.SET_EFFECT_TEXTS or {}
     Weights.UNRATED_SET_EFFECT = profile.UNRATED_SET_EFFECT or 5
     cache = {}
+    mainCache = {}
 end
 
 -- Questing values of the selected class at a level
@@ -300,6 +302,48 @@ function Weights.BandText(spec)
     local t = Weights.RoleShare(level, maxLevel)
     if t >= 1 then return "max level" end
     return ("level %d: questing %d%%"):format(level, math.floor((1 - t) * 100 + 0.5))
+end
+
+-- Main stats ------------------------------------------------------------------
+-- The stats a spec is built around. An item that loses main stats compared
+-- with your gear is at best "equal" (Core/Compare.lua), however much
+-- Stamina, Armor or resistances it adds, and the tooltip lists main stats
+-- first. Defaults by role (healers, tanks) or attack type (damage specs); a
+-- spec in a class profile adds its own with `mainExtra = { ... }`.
+Weights.MAIN_STATS = {
+    Healer = { "HEALING", "SPELL_POWER", "INTELLECT", "SPIRIT", "MANA_REGENERATION" },
+    Tank   = { "STAMINA", "ARMOR", "DEFENSE", "DODGE", "PARRY", "BLOCK", "BLOCK_VALUE" },
+    SPELL  = { "SPELL_DAMAGE", "SPELL_POWER", "HOLY_DAMAGE", "FIRE_DAMAGE", "NATURE_DAMAGE",
+               "FROST_DAMAGE", "SHADOW_DAMAGE", "ARCANE_DAMAGE", "INTELLECT" },
+    MELEE  = { "STRENGTH", "AGILITY", "ATTACK_POWER", "DPS" },
+    RANGED = { "AGILITY", "RANGED_ATTACK_POWER", "ATTACK_POWER", "RANGED_DPS" },
+}
+
+-- Set of a spec's main stats
+function Weights.MainStats(spec)
+    local set = mainCache[spec]
+    if set then return set end
+    local info = ns.Spec.INFO[spec] or {}
+    set = {}
+    for _, stat in ipairs(Weights.MAIN_STATS[info.role] or Weights.MAIN_STATS[info.attack or "SPELL"] or {}) do
+        set[stat] = true
+    end
+    for _, stat in ipairs(info.mainExtra or {}) do set[stat] = true end
+    mainCache[spec] = set
+    return set
+end
+
+-- Is the stat key a main stat of the spec? Combined keys
+-- (STRENGTH_AGILITY_INTELLECT) count if one part is.
+function Weights.IsMainStat(spec, stat)
+    local set = Weights.MainStats(spec)
+    if set[stat] then return true end
+    if stat:find("_") and not stat:find("_DAMAGE$") then
+        for part in stat:gmatch("[^_]+") do
+            if Weights.PRIMARY[part] and set[part] then return true end
+        end
+    end
+    return false
 end
 
 -- Weight of a single stat key; handles combined primary stat keys.

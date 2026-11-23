@@ -3,8 +3,12 @@
 -- For every spec of the class the item gets a score delta:
 --   sum over stats of (stat change x spec weight), with caps applied against
 --   the player's current totals, plus the change in set bonus value.
+-- Two-handers are compared with one-hander + off hand pairs (see "Weapon
+-- pairs" below). While leveling, how long an item stays current adds to it
+-- (see "Longevity").
 -- The delta is turned into a verdict: UPGRADE, LATER (needs a higher level),
--- KEEP (set piece), SIDEGRADE, NO, UNUSABLE or EQUIPPED.
+-- KEEP (set piece), SIDEGRADE, NO, UNUSABLE or EQUIPPED. Main stats lead: an
+-- item that loses the spec's main stats is at best SIDEGRADE.
 local _, ns = ...
 
 local Compare = {}
@@ -81,12 +85,19 @@ local function CanDualWield()
     return true
 end
 
--- Plain score of a stat table (caps limit a single item, not totals)
-function Compare.RawScore(stats, spec, weights)
+-- Off-hand attacks deal half damage (classic), so weapon DPS in the off hand
+-- counts half. Talents like Dual Wield Specialization raise DPS weights.
+Compare.OFF_HAND_DPS = 0.5
+
+-- Plain score of a stat table (caps limit a single item, not totals).
+-- off = the item sits in the off hand, so its weapon DPS counts half.
+-- filter: optional function(stat) -> true for the stats to count.
+function Compare.RawScore(stats, spec, weights, off, filter)
     local score = 0
     for stat, value in pairs(stats or {}) do
         local w = ns.Weights.Of(weights, stat)
-        if w > 0 then
+        if w > 0 and (not filter or filter(stat)) then
+            if off and stat == "DPS" then w = w * Compare.OFF_HAND_DPS end
             local _, cap = ns.Character:CapUnits(spec, stat)
             score = score + (cap and math.min(value, cap) or value) * w
         end
@@ -94,75 +105,241 @@ function Compare.RawScore(stats, spec, weights)
     return score
 end
 
+-- Longevity while leveling ----------------------------------------------------
+-- Gear is outgrown some levels after its required level, and better quality
+-- lasts longer: a blue item keeps up longer than a green one of the same
+-- level. While leveling, each level an item stays current adds a share of
+-- its score, so an item in your level range beats a lower-level item with
+-- slightly better stats that you would replace soon anyway.
+
+-- Levels an item stays current after its required level, by quality
+-- (0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary, 6 artifact,
+-- 7 heirloom - heirlooms grow with you)
+Compare.LIFESPAN = { [0] = 2, [1] = 4, [2] = 7, [3] = 11, [4] = 16, [5] = 25, [6] = 25, [7] = 99 }
+Compare.LONGEVITY_PER_LEVEL = 0.03   -- value of each level ahead, as a share of the item's score
+Compare.LONGEVITY_HORIZON = 10       -- levels ahead that count
+
+-- The level up to which an item stays current. Items without a required
+-- level count from their item level (required level ~ item level - 5).
+function Compare.LastsTo(item)
+    local base = item.reqLevel or 0
+    if base <= 0 then base = math.max(1, (item.ilvl or 1) - 5) end
+    return base + (Compare.LIFESPAN[item.quality or 2] or Compare.LIFESPAN[2])
+end
+
+-- Levels the item stays current, from now or, for an item that needs a
+-- higher level, from that level (0 at max level)
+function Compare.LevelsLeft(item)
+    local level, maxLevel = ns.Spec.GetLevel(), ns.Spec.GetMaxLevel()
+    if level >= maxLevel then return 0 end
+    local from = math.max(level, item.reqLevel or 0)
+    local left = math.min(Compare.LastsTo(item), maxLevel) - from
+    return math.max(0, math.min(Compare.LONGEVITY_HORIZON, left))
+end
+
+-- Score of an item including its longevity while leveling; what rankings
+-- and the choice of a partner or of the weaker ring go by
+function Compare.ItemValue(item, spec, weights, off)
+    local raw = Compare.RawScore(item.stats, spec, weights, off)
+    return raw * (1 + Compare.LONGEVITY_PER_LEVEL * Compare.LevelsLeft(item))
+end
+
 local function TwoHandName(item)
     return item.subclassID == STAFF and "staff" or "two-hander"
 end
 
--- Off-hand attacks deal half damage (classic), so weapon DPS in the off hand
--- counts half. Talents like Dual Wield Specialization raise DPS weights.
-Compare.OFF_HAND_DPS = 0.5
+-- Weapon pairs ---------------------------------------------------------------
+-- A two-hander takes both hands, so it is compared with a one-hander and an
+-- off hand together: a one-hander or off hand hovered while you wear a
+-- two-hander is paired with the best fitting item from your bags or bank,
+-- and the weapons list ranks one-handers together with the best off hand
+-- seen.
 
--- Which equipped items the new item would replace.
--- Returns list of replaced infos, an optional note, and true if the item
--- goes into the off hand as a weapon (its DPS then counts half).
-function Compare.GetReplaced(info, spec, weights)
+-- Items that can be one half of a pair (two-handers can't)
+local PAIR_LOCS = {
+    INVTYPE_WEAPON = true, INVTYPE_WEAPONMAINHAND = true,
+    INVTYPE_SHIELD = true, INVTYPE_HOLDABLE = true, INVTYPE_WEAPONOFFHAND = true,
+}
+
+-- Can an item of this slot go into the off hand next to a one-hander?
+-- dualWield: result of CanDualWield()
+local function FitsOffHand(loc, dualWield)
+    if loc == "INVTYPE_SHIELD" or loc == "INVTYPE_HOLDABLE" then return true end
+    if loc == "INVTYPE_WEAPON" or loc == "INVTYPE_WEAPONOFFHAND" then return dualWield end
+    return false
+end
+
+-- The hands an item can take in a pair: false = main hand, true = off hand.
+-- A one-hander of a dual wielder can take either.
+local function PairHands(loc, dualWield)
+    local hands = {}
+    if MAIN_HAND[loc] then hands[#hands + 1] = false end
+    if OFF_HAND[loc] or (loc == "INVTYPE_WEAPON" and dualWield) then hands[#hands + 1] = true end
+    return hands
+end
+
+-- Score of a pool candidate in one hand (rankings precompute it)
+local function CandidateScore(c, off, spec, weights)
+    local cached
+    if off then cached = c.offScore else cached = c.mainScore end
+    if cached then return cached end
+    return Compare.ItemValue(c.entry, spec, weights, off)
+end
+
+-- Best partner for a one-hander or off hand from a pool of candidates
+-- { key, entry, count, where }. Returns the partner { item, key, where, off },
+-- whether the item itself goes into the off hand, and the pair's score.
+-- nil if nothing in the pool fits or adds anything. An item is never paired
+-- with itself unless there are two of it.
+function Compare.BestPartner(info, pool, spec, weights)
+    local best
+    local dualWield = CanDualWield()
+    for _, off in ipairs(PairHands(info.equipLoc, dualWield)) do
+        local own = Compare.ItemValue(info, spec, weights, off)
+        for _, c in ipairs(pool) do
+            local loc = c.entry.equipLoc
+            local fits
+            if off then fits = MAIN_HAND[loc] else fits = FitsOffHand(loc, dualWield) end
+            if fits and (c.key ~= info.key or (c.count or 1) > 1) then
+                local s = CandidateScore(c, not off, spec, weights)
+                local total = own + s
+                if s > 0 and (not best or total > best.score
+                        or (total == best.score and c.key < best.partner.key)) then
+                    best = { score = total, off = off,
+                             partner = { item = c.entry, key = c.key, where = c.where, off = not off } }
+                end
+            end
+        end
+    end
+    if best then return best.partner, best.off, best.score end
+    return nil
+end
+
+local ownedCache = {}
+
+-- One-handers and off hands in your bags and bank that you can use now:
+-- the partners for a pair against a worn two-hander.
+function Compare.OwnedPartners()
+    local KB = ns.KB
+    ns.Character:Get()
+    local level = ns.Spec.GetLevel()
+    local stamp = (KB.revision or 0) .. ":" .. (ns.Character.version or 0) .. ":" .. level
+        .. ":" .. tostring(ns.classToken)
+    if ownedCache.stamp == stamp then return ownedCache.list end
+
+    local list, byKey = {}, {}
+    local owned, items = KB.owned or {}, KB.items or {}
+    for _, place in ipairs({ "bags", "bank" }) do
+        for key, count in pairs(owned[place] or {}) do
+            local entry = items[key]
+            if entry and PAIR_LOCS[entry.equipLoc] and (entry.reqLevel or 0) <= level
+                    and ns.ItemData.CanUse(entry) then
+                local c = byKey[key]
+                if not c then
+                    c = { key = key, entry = entry, count = 0, where = place }
+                    byKey[key] = c
+                    list[#list + 1] = c
+                end
+                c.count = c.count + count
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a.key < b.key end)
+    ownedCache = { stamp = stamp, list = list }
+    return list
+end
+
+-- How the item would be worn for one spec:
+--   added    = { { item, off }, ... }  the item, and its partner if it has one
+--   replaced = { { item, off }, ... }  equipped items that come off
+--   note     = optional text, partner = { item, key, where, off } or nil
+-- off = in the off hand (weapon DPS counts half). With `partner` given (the
+-- weapons list), the item and the partner replace whatever is in both hands.
+function Compare.Plan(info, spec, weights, partner)
     local C = ns.Character
     local loc = info.equipLoc
     local slots = Compare.SLOTS[loc]
-    local mainHand = C:EquippedInSlot(16)
+    local mainHand, offHand = C:EquippedInSlot(16), C:EquippedInSlot(17)
+    local plan = { added = {}, replaced = {} }
+    local function put(item, off) plan.added[#plan.added + 1] = { item = item, off = off } end
+    local function takeOff(item, off)
+        if item then plan.replaced[#plan.replaced + 1] = { item = item, off = off } end
+    end
+
+    if partner then
+        put(info, not partner.off)
+        put(partner.item, partner.off)
+        takeOff(mainHand, false)
+        takeOff(offHand, true)
+        plan.partner = partner
+        return plan
+    end
 
     if loc == TWO_HAND then
-        local replaced = {}
-        if mainHand then table.insert(replaced, mainHand) end
-        local offHand = C:EquippedInSlot(17)
-        if offHand then table.insert(replaced, offHand) end
-        if offHand then return replaced, "Replaces main hand and off hand" end
-        return replaced
+        put(info, false)
+        takeOff(mainHand, false)
+        takeOff(offHand, true)
+        if offHand then plan.note = "Replaces main hand and off hand" end
+        return plan
+    end
+
+    -- Against a worn two-hander, a one-hander or off hand counts together
+    -- with the best partner you carry
+    if mainHand and mainHand.equipLoc == TWO_HAND and (MAIN_HAND[loc] or OFF_HAND[loc]) then
+        takeOff(mainHand, false)
+        local found, off = Compare.BestPartner(info, Compare.OwnedPartners(), spec, weights)
+        if found then
+            put(info, off)
+            put(found.item, found.off)
+            plan.partner = found
+        elseif MAIN_HAND[loc] then
+            put(info, false)
+            plan.note = ("Replaces your %s (off hand becomes free)"):format(TwoHandName(mainHand))
+        else
+            put(info, true)
+            plan.note = ("Needs a one-handed weapon - compared against your %s"):format(TwoHandName(mainHand))
+        end
+        return plan
     end
 
     -- Dual wield: a one-hander replaces the weaker of two equipped weapons
-    if loc == "INVTYPE_WEAPON" and CanDualWield() and not (mainHand and mainHand.equipLoc == TWO_HAND) then
-        local offHand = C:EquippedInSlot(17)
-        if offHand and offHand.classID == ITEM_CLASS_WEAPON and mainHand then
-            if Compare.RawScore(mainHand.stats, spec, weights) <= Compare.RawScore(offHand.stats, spec, weights) then
-                return { mainHand }
+    if loc == "INVTYPE_WEAPON" and CanDualWield() and mainHand then
+        if offHand and offHand.classID == ITEM_CLASS_WEAPON then
+            if Compare.ItemValue(mainHand, spec, weights) <= Compare.ItemValue(offHand, spec, weights) then
+                put(info, false)
+                takeOff(mainHand, false)
+                return plan
             end
-            return { offHand }, "Compared against your off-hand weapon (off-hand damage counts half)", true
+            put(info, true)
+            takeOff(offHand, true)
+            plan.note = "Compared against your off-hand weapon (off-hand damage counts half)"
+            return plan
         end
-        if mainHand and not offHand then
-            return {}, "Fills your empty off hand (dual wield, off-hand damage counts half)", true
+        if not offHand then
+            put(info, true)
+            plan.note = "Fills your empty off hand (dual wield, off-hand damage counts half)"
+            return plan
         end
-    end
-    if loc == "INVTYPE_WEAPONOFFHAND" then
-        local offHand = C:EquippedInSlot(17)
-        if mainHand and mainHand.equipLoc == TWO_HAND then
-            return { mainHand }, ("Needs a one-handed weapon - compared against your %s"):format(TwoHandName(mainHand)), true
-        end
-        if not offHand then return {}, "Fills an empty slot", true end
-        return { offHand }, nil, true
     end
 
     if #slots == 2 then
+        put(info, false)
         local a, b = C:EquippedInSlot(slots[1]), C:EquippedInSlot(slots[2])
-        if not a or not b then return {}, "Fills an empty slot" end
-        -- Replace the weaker of the two
-        if Compare.RawScore(a.stats, spec, weights) <= Compare.RawScore(b.stats, spec, weights) then
-            return { a }
+        if not a or not b then
+            plan.note = "Fills an empty slot"
+        elseif Compare.ItemValue(a, spec, weights) <= Compare.ItemValue(b, spec, weights) then
+            takeOff(a, false)   -- replace the weaker of the two
+        else
+            takeOff(b, false)
         end
-        return { b }
+        return plan
     end
 
-    if mainHand and mainHand.equipLoc == TWO_HAND then
-        if MAIN_HAND[loc] then
-            return { mainHand }, ("Replaces your %s (off hand becomes free)"):format(TwoHandName(mainHand))
-        elseif OFF_HAND[loc] then
-            return { mainHand }, ("Needs a one-handed weapon - compared against your %s"):format(TwoHandName(mainHand))
-        end
-    end
-
+    local off = slots[1] == 17
+    put(info, off)
     local equipped = C:EquippedInSlot(slots[1])
-    if not equipped then return {}, "Fills an empty slot" end
-    return { equipped }
+    if equipped then takeOff(equipped, off) else plan.note = "Fills an empty slot" end
+    return plan
 end
 
 function Compare.IsEquipped(info)
@@ -176,21 +353,22 @@ function Compare.IsEquipped(info)
 end
 
 -- Set bonus change for one spec
-local function SetDelta(info, replaced, spec, weights)
+local function SetDelta(plan, spec, weights)
     local C = ns.Character
-    local affected = {}
-    if info.setID then affected[info.setID] = true end
-    for _, r in ipairs(replaced) do
-        if r.setID then affected[r.setID] = true end
+    local change = {}
+    for _, worn in ipairs(plan.added) do
+        local setID = worn.item.setID
+        if setID then change[setID] = (change[setID] or 0) + 1 end
+    end
+    for _, worn in ipairs(plan.replaced) do
+        local setID = worn.item.setID
+        if setID then change[setID] = (change[setID] or 0) - 1 end
     end
 
     local total, changes = 0, {}
-    for setID in pairs(affected) do
+    for setID, diff in pairs(change) do
         local before = C:SetCount(setID)
-        local after = before + ((info.setID == setID) and 1 or 0)
-        for _, r in ipairs(replaced) do
-            if r.setID == setID then after = after - 1 end
-        end
+        local after = before + diff
         if after ~= before then
             local value = ns.SetBonus.Value(setID, after, spec, weights) - ns.SetBonus.Value(setID, before, spec, weights)
             local gained, lost = ns.SetBonus.ChangedEffects(setID, before, after)
@@ -204,35 +382,61 @@ local function SetDelta(info, replaced, spec, weights)
     return total, changes
 end
 
--- Score delta of an item for one spec
-function Compare.ScoreRole(info, spec)
+-- Changes smaller than this are rounding noise from adding and removing
+-- the same item (a worn partner in a pair)
+local EPSILON = 1e-6
+
+-- Score delta of an item for one spec. partner: see Compare.Plan.
+function Compare.ScoreRole(info, spec, partner)
     local C = ns.Character
     local weights = ns.Weights.Get(spec)
-    local replaced, note, offHand = Compare.GetReplaced(info, spec, weights)
+    local plan = Compare.Plan(info, spec, weights, partner)
 
-    local delta = {}
-    for stat, v in pairs(info.stats) do delta[stat] = v end
-    for _, r in ipairs(replaced) do
-        for stat, v in pairs(r.stats) do delta[stat] = (delta[stat] or 0) - v end
+    -- delta: the stat change as shown; counted: as it counts, with weapon
+    -- DPS in the off hand at half
+    local delta, counted = {}, {}
+    local function apply(list, sign)
+        for _, worn in ipairs(list) do
+            for stat, v in pairs(worn.item.stats or {}) do
+                local factor = (worn.off and stat == "DPS") and Compare.OFF_HAND_DPS or 1
+                delta[stat] = (delta[stat] or 0) + sign * v
+                counted[stat] = (counted[stat] or 0) + sign * v * factor
+            end
+        end
     end
+    apply(plan.added, 1)
+    apply(plan.replaced, -1)
 
-    local score, contributions = 0, {}
+    local isMain = function(stat) return ns.Weights.IsMainStat(spec, stat) end
+    local score, mainValue, contributions = 0, 0, {}
     for stat, dv in pairs(delta) do
         local w = ns.Weights.Of(weights, stat)
-        if offHand and stat == "DPS" then w = w * Compare.OFF_HAND_DPS end
-        if w > 0 and dv ~= 0 then
-            local effective, capped = dv, false
+        local cv = counted[stat]
+        if w > 0 and (math.abs(dv) > EPSILON or math.abs(cv) > EPSILON) then
+            local effective, capped = cv, false
             local total, cap = C:CapUnits(spec, stat)
             if cap then
-                effective = math.min(total + dv, cap) - math.min(total, cap)
-                capped = math.abs(effective - dv) > 0.001
+                effective = math.min(total + cv, cap) - math.min(total, cap)
+                capped = math.abs(effective - cv) > 0.001
             end
             local value = effective * w
             score = score + value
-            table.insert(contributions, { stat = stat, delta = dv, value = value, capped = capped })
+            local c = { stat = stat, delta = dv, value = value, capped = capped, main = isMain(stat) }
+            if c.main then
+                mainValue = mainValue + value
+                -- Change against what your gear has of the stat
+                local gear = C:Total(stat)
+                if gear > 0 then c.pct = dv / gear * 100 end
+            end
+            table.insert(contributions, c)
         end
     end
-    table.sort(contributions, function(a, b) return math.abs(a.value) > math.abs(b.value) end)
+    -- Main stats first, then by size
+    table.sort(contributions, function(a, b)
+        if a.main ~= b.main then return a.main end
+        if math.abs(a.value) ~= math.abs(b.value) then return math.abs(a.value) > math.abs(b.value) end
+        return a.stat < b.stat
+    end)
 
     -- The item's own stats that are worth nothing for this spec (e.g. Fire
     -- damage for a Shadow Priest, spell power for a Warrior)
@@ -244,11 +448,46 @@ function Compare.ScoreRole(info, spec)
     end
     table.sort(ignored, function(a, b) return a.stat < b.stat end)
 
-    local setValue, setChanges = SetDelta(info, replaced, spec, weights)
+    local setValue, setChanges = SetDelta(plan, spec, weights)
     score = score + setValue
 
-    local base = 0
-    for _, r in ipairs(replaced) do base = base + Compare.RawScore(r.stats, spec, weights) end
+    local base, mainBase, replaced = 0, 0, {}
+    for _, worn in ipairs(plan.replaced) do
+        base = base + Compare.RawScore(worn.item.stats, spec, weights, worn.off)
+        mainBase = mainBase + Compare.RawScore(worn.item.stats, spec, weights, worn.off, isMain)
+        replaced[#replaced + 1] = worn.item
+    end
+
+    -- Longevity while leveling: each level an item stays current is worth a
+    -- share of its score (the main stats' share for the main-stat check)
+    local longevity
+    if ns.Spec.IsLeveling() then
+        local p = Compare.LONGEVITY_PER_LEVEL
+        local value, mainLife, yours = 0, 0, nil
+        local function life(list, sign)
+            for _, worn in ipairs(list) do
+                local left = p * Compare.LevelsLeft(worn.item) * sign
+                value = value + left * Compare.RawScore(worn.item.stats, spec, weights, worn.off)
+                mainLife = mainLife + left * Compare.RawScore(worn.item.stats, spec, weights, worn.off, isMain)
+            end
+        end
+        life(plan.added, 1)
+        life(plan.replaced, -1)
+        for _, worn in ipairs(plan.replaced) do
+            yours = math.min(yours or math.huge, Compare.LastsTo(worn.item))
+        end
+        local maxLevel = ns.Spec.GetMaxLevel()
+        longevity = {
+            value = value,
+            lasts = math.min(Compare.LastsTo(info), maxLevel),
+            yours = yours and math.min(yours, maxLevel),
+        }
+        score = score + value
+        mainValue = mainValue + mainLife
+    end
+
+    -- Main stats lead: losing them can't be made up by minor stats alone
+    local mainLoss = mainValue < -math.max(0.5, mainBase * 0.02)
 
     return {
         spec = spec,
@@ -258,8 +497,12 @@ function Compare.ScoreRole(info, spec)
         contributions = contributions,
         ignored = ignored,
         sets = setChanges,
+        longevity = longevity,
+        mainValue = mainValue,
+        mainLoss = mainLoss,
         replaced = replaced,
-        note = note,
+        partner = plan.partner,
+        note = plan.note,
     }
 end
 
@@ -282,21 +525,45 @@ local function Threshold(role)
     return math.max(0.5, role.base * 0.01)
 end
 
+-- Better, equal or worse by the score. Main stats lead: an item that loses
+-- main stats is at best equal, whatever minor stats it adds.
+local function ScoreVerdict(role)
+    local threshold = Threshold(role)
+    if role.score > threshold then return role.mainLoss and "SIDEGRADE" or "UPGRADE" end
+    if role.score > -threshold then return "SIDEGRADE" end
+    return "NO"
+end
+
+-- Did the main-stat rule turn an upgrade into "equal"?
+local function MainStatsHeldBack(role)
+    return role.mainLoss and role.score > Threshold(role)
+end
+
 -- needLevel: the level from which the item can be used (its required level,
 -- or the level the armor or weapon type can be learned)
 local function RoleVerdict(role, usable, equipped, level, needLevel)
-    local threshold = Threshold(role)
     if not usable then return "UNUSABLE" end
     if equipped then return "EQUIPPED" end
-    if needLevel > level then
-        return role.score > threshold and "LATER" or "NO"
-    end
-    if role.score > threshold then return "UPGRADE" end
+    local verdict = ScoreVerdict(role)
+    if needLevel > level then return verdict == "UPGRADE" and "LATER" or "NO" end
+    if verdict == "UPGRADE" then return verdict end
     -- Nothing on the item counts for this spec (a healer necklace for a
     -- Rogue): not "equal", just worthless
     if #role.contributions == 0 and #role.ignored > 0 and #role.sets == 0 then return "NO" end
-    if role.score > -threshold then return "SIDEGRADE" end
-    return "NO"
+    return verdict
+end
+
+-- "Loses main stats: Agility -4, Attack Power -10"
+local function MainLossText(role)
+    local parts = {}
+    for _, c in ipairs(role.contributions) do
+        if c.main and c.value < 0 and #parts < 2 then
+            local rounded = math.floor(c.delta * 10 + 0.5) / 10
+            parts[#parts + 1] = ns.ItemData.StatLabel(c.stat) .. " " .. rounded
+        end
+    end
+    if #parts == 0 then return "Main stats last fewer levels than yours" end
+    return "Loses main stats: " .. table.concat(parts, ", ")
 end
 
 -- Full evaluation of an item. context: "MERCHANT", "LOOT" or nil
@@ -343,6 +610,8 @@ function Compare.Evaluate(info, context)
         reason = (learnLevel and learnLevel >= (info.reqLevel or 0)) and unusableReason
             or ("Requires level " .. needLevel)
     elseif overall == "KEEP" then reason = keepReason
+    elseif (overall == "SIDEGRADE" or overall == "NO") and MainStatsHeldBack(current) then
+        reason = MainLossText(current)
     end
 
     return {
@@ -371,6 +640,9 @@ function Compare.ActionText(verdict, context, info, offSpec, needLevel)
         return bag
     end
     local lvl = needLevel or info.reqLevel or 0
+    -- Bags and chat links also cover quest rewards: don't take it, or sell
+    -- (drop) it if you already have it
+    local rid = "do not take/" .. (((info.sellPrice or 0) > 0) and "sell" or "drop")
 
     if verdict == "UPGRADE" then
         return pick("Equip now", "Buy & equip", "Take & equip")
@@ -386,11 +658,11 @@ function Compare.ActionText(verdict, context, info, offSpec, needLevel)
     elseif verdict == "EQUIPPED" then
         return "Currently equipped"
     elseif verdict == "UNUSABLE" then
-        return pick("Can't use - sell", "Can't use - skip", "Can't use - loot & sell")
+        return pick("Can't use - " .. rid, "Can't use - skip", "Can't use - loot & sell")
     end
     -- NO
     local sellable = (info.sellPrice or 0) > 0
-    return pick(sellable and "Sell" or "Drop", "Skip", sellable and "Loot & sell" or "Leave it")
+    return pick((rid:gsub("^d", "D")), "Skip", sellable and "Loot & sell" or "Leave it")
 end
 
 -- Ranking of known items ---------------------------------------------------
@@ -406,35 +678,118 @@ function Compare.GroupOf(equipLoc)
     return groupOf[equipLoc]
 end
 
--- Where a known item is, long form for chat
-local function WhereText(entry, key)
-    local owned = ns.KB.owned
-    if Compare.IsEquipped(entry) then return "equipped" end
-    if owned.bags[key] then return "in bags" end
-    if owned.bank[key] then return "in bank" end
-    if entry.vendor then return "vendor: " .. entry.vendor end
-    if entry.zone then return "seen in " .. entry.zone end
-    return "seen via " .. (entry.lastSource or "?")
+-- Where you have the item: "worn", "bags", "bank" or nil
+function Compare.Location(entry, key)
+    local owned = ns.KB.owned or {}
+    if Compare.IsEquipped(entry) then return "worn" end
+    if (owned.bags or {})[key] then return "bags" end
+    if (owned.bank or {})[key] then return "bank" end
+    return nil
 end
 
--- Where a known item is, one word for the tooltip
+-- How an item is obtained, from what the knowledge base saw: a list of
+-- { tag, detail }, most telling first. Tags: quest (reward), raid and
+-- dungeon (drop in an instance), crafted (profession), vendor, drop (world).
+function Compare.Origins(item)
+    local list = {}
+    if not item then return list end
+    local entry = (item.key and ns.KB:Get(item.key)) or item
+    local function add(tag, detail)
+        list[#list + 1] = { tag = tag, detail = (type(detail) == "string" and detail ~= "") and detail or nil }
+    end
+    if entry.quest then add("quest", entry.quest) end
+    if entry.instanceType == "raid" then add("raid", entry.instance)
+    elseif entry.instanceType == "party" then add("dungeon", entry.instance) end
+    if entry.profession then add("crafted", entry.profession) end
+    if entry.vendor then add("vendor", entry.vendor) end
+    if entry.zone and not entry.instanceType then add("drop", entry.zone) end
+    return list
+end
+
+local LOCATION_TEXT = { worn = "equipped", bags = "in bags", bank = "in bank" }
+
+-- Where a known item is and how it is obtained, long form for chat
+local function WhereText(entry, key)
+    local parts = {}
+    local location = Compare.Location(entry, key)
+    if location then parts[1] = LOCATION_TEXT[location] end
+    for _, origin in ipairs(Compare.Origins(entry)) do
+        parts[#parts + 1] = origin.tag .. (origin.detail and (": " .. origin.detail) or "")
+    end
+    if #parts == 0 then return "seen via " .. (entry.lastSource or "?") end
+    return table.concat(parts, "; ")
+end
+
+-- Where a known item is, one word for the tooltip: where you have it, else
+-- how it is obtained, else where it was seen
 function Compare.WhereShort(entry, key)
-    local owned = ns.KB.owned
-    if Compare.IsEquipped(entry) then return "worn" end
-    if owned.bags[key] then return "bags" end
-    if owned.bank[key] then return "bank" end
-    if entry.vendor then return "vendor" end
-    if entry.zone then return "loot" end
+    local location = Compare.Location(entry, key)
+    if location then return location end
+    local origin = Compare.Origins(entry)[1]
+    if origin then return origin.tag end
     if entry.lastSource == "chat" then return "chat" end
     return "seen"
 end
 
 local rankCache = {}
 
+-- Known one-handers and off hands usable at `level`, with their score in
+-- each hand they fit: the partners for one-handers in the weapons list
+local function KnownPartners(spec, weights, level)
+    local pool = {}
+    local owned = ns.KB.owned or {}
+    local dualWield = CanDualWield()
+    for key, entry in pairs(ns.KB.items or {}) do
+        if PAIR_LOCS[entry.equipLoc] and (entry.reqLevel or 0) <= level and ns.ItemData.CanUse(entry) then
+            local c = { key = key, entry = entry, where = Compare.WhereShort(entry, key) }
+            -- Two of the same weapon: owned twice, or sold by a vendor
+            local count = ((owned.bags or {})[key] or 0) + ((owned.bank or {})[key] or 0)
+            if Compare.IsEquipped(entry) then count = count + 1 end
+            c.count = entry.vendor and 2 or math.max(1, count)
+            if MAIN_HAND[entry.equipLoc] then c.mainScore = Compare.ItemValue(entry, spec, weights) end
+            if FitsOffHand(entry.equipLoc, dualWield) then c.offScore = Compare.ItemValue(entry, spec, weights, true) end
+            pool[#pool + 1] = c
+        end
+    end
+    table.sort(pool, function(a, b) return a.key < b.key end)
+    return pool
+end
+
+-- The partner a worn one-hander has in the other hand, or nil
+local function WornPartner(entry)
+    local C = ns.Character
+    local mainHand, offHand = C:EquippedInSlot(16), C:EquippedInSlot(17)
+    if mainHand and mainHand.key == entry.key and offHand then
+        return { item = offHand, key = offHand.key, where = "worn", off = true }
+    end
+    if offHand and offHand.key == entry.key and mainHand then
+        return { item = mainHand, key = mainHand.key, where = "worn", off = false }
+    end
+    return nil
+end
+
+-- Score of a weapon in the weapons list: a one-hander counts together with
+-- its partner (the worn one if it is worn, else the best one seen).
+-- Returns the score and the partner (nil: alone).
+local function WeaponScore(entry, pool, spec, weights)
+    local own = Compare.ItemValue(entry, spec, weights)
+    if entry.equipLoc == TWO_HAND then return own end
+    local worn = WornPartner(entry)
+    if worn then
+        return Compare.ItemValue(entry, spec, weights, not worn.off)
+            + Compare.ItemValue(worn.item, spec, weights, worn.off), worn
+    end
+    local partner, _, pairScore = Compare.BestPartner(entry, pool, spec, weights)
+    if partner then return pairScore, partner end
+    return own
+end
+
 -- Known items of a slot group the player can use at the current level, best
--- first for `spec`: list of { key, entry, score }. Cached until the knowledge
--- base, the gear, the level or the talents change (tooltips refresh several
--- times a second).
+-- first for `spec`: list of { key, entry, score, partner }. In the weapons
+-- list a one-hander is scored together with an off hand (partner), so it
+-- competes with two-handers on equal terms. Also returns the partner pool
+-- (weapons list only). Cached until the knowledge base, the gear, the level
+-- or the talents change (tooltips refresh several times a second).
 function Compare.Ranking(groupName, spec)
     local group = Compare.GROUPS[groupName]
     if not group then return {} end
@@ -444,21 +799,28 @@ function Compare.Ranking(groupName, spec)
         .. ":" .. ns.Weights.Signature() .. ":" .. tostring(ns.classToken)
     local cacheKey = groupName .. ":" .. spec
     local cached = rankCache[cacheKey]
-    if cached and cached.stamp == stamp then return cached.list end
+    if cached and cached.stamp == stamp then return cached.list, cached.pool end
 
     local weights = ns.Weights.Get(spec)
+    local pool = groupName == "mainhand" and KnownPartners(spec, weights, level) or nil
     local list = {}
     for key, entry in pairs(ns.KB.items or {}) do
         if group[entry.equipLoc] and (entry.reqLevel or 0) <= level and ns.ItemData.CanUse(entry) then
-            table.insert(list, { key = key, entry = entry, score = Compare.RawScore(entry.stats, spec, weights) })
+            local e = { key = key, entry = entry }
+            if pool then
+                e.score, e.partner = WeaponScore(entry, pool, spec, weights)
+            else
+                e.score = Compare.ItemValue(entry, spec, weights)
+            end
+            table.insert(list, e)
         end
     end
     table.sort(list, function(a, b)
         if a.score ~= b.score then return a.score > b.score end
         return a.key < b.key
     end)
-    rankCache[cacheKey] = { stamp = stamp, list = list }
-    return list
+    rankCache[cacheKey] = { stamp = stamp, list = list, pool = pool }
+    return list, pool
 end
 
 -- Where an item stands among the known items of its slot group:
@@ -469,7 +831,7 @@ end
 function Compare.Rank(info, spec)
     local groupName = groupOf[info.equipLoc]
     if not groupName then return nil end
-    local list = Compare.Ranking(groupName, spec)
+    local list, pool = Compare.Ranking(groupName, spec)
     local result = {
         group = groupName, label = Compare.GROUP_LABELS[groupName] or groupName,
         list = list, total = #list, eligible = false,
@@ -480,7 +842,8 @@ function Compare.Rank(info, spec)
             return result
         end
     end
-    local score = Compare.RawScore(info.stats, spec, ns.Weights.Get(spec))
+    local weights = ns.Weights.Get(spec)
+    local score = pool and WeaponScore(info, pool, spec, weights) or Compare.ItemValue(info, spec, weights)
     local rank = 1
     for _, e in ipairs(list) do
         if e.score > score then rank = rank + 1 end
@@ -491,16 +854,15 @@ end
 
 -- Improvement of a ranked item over the current gear: score change (as in the
 -- tooltip's first line, set bonuses included) and "UPGRADE", "SIDEGRADE" or
--- "NO". Returns nil for items that are worn. Memoized on the ranking entry,
--- which is rebuilt when gear, level or the knowledge base change.
+-- "NO". A one-hander with a partner counts as the pair against both hands.
+-- Returns nil for items that are worn. Memoized on the ranking entry, which
+-- is rebuilt when gear, level or the knowledge base change.
 function Compare.Improvement(e, spec)
     if Compare.IsEquipped(e.entry) then return nil end
     if e.improvementSpec ~= spec then
-        local role = Compare.ScoreRole(e.entry, spec)
-        local threshold = Threshold(role)
+        local role = Compare.ScoreRole(e.entry, spec, e.partner)
         e.improvement = role.score
-        e.improvementVerdict = role.score > threshold and "UPGRADE"
-            or role.score > -threshold and "SIDEGRADE" or "NO"
+        e.improvementVerdict = ScoreVerdict(role)
         e.improvementSpec = spec
     end
     return e.improvement, e.improvementVerdict
@@ -535,8 +897,11 @@ ns:RegisterCommand("best", function() return "<slot> [" .. ns.Spec.ChoiceText() 
     for i = 1, math.min(5, #list) do
         local e = list[i]
         local delta = Compare.Improvement(e, spec)
-        print(("  %d. %s  score %.1f%s  (%s)"):format(i, e.entry.link or e.entry.name, e.score,
+        local p = e.partner
+        print(("  %d. %s%s  score %.1f%s  (%s%s)"):format(i, e.entry.link or e.entry.name,
+            p and (" + " .. (p.item.link or p.item.name or "?")) or "", e.score,
             delta and ((", %s%.1f vs. your gear"):format(delta >= 0 and "+" or "", delta)) or "",
-            WhereText(e.entry, e.key)))
+            WhereText(e.entry, e.key),
+            p and ("; " .. (p.off and "off hand " or "main hand ") .. WhereText(p.item, p.key)) or ""))
     end
 end)
