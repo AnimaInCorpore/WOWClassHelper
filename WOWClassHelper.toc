@@ -2,7 +2,7 @@
 ## Title: WOWClassHelper
 ## Notes: Gear advisor for every class and spec in WoW Forever
 ## Author: Sascha
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: WOWClassHelperDB
 ## SavedVariablesPerCharacter: WOWClassHelperCharDB
 ## IconTexture: Interface\Icons\INV_Misc_Gear_01

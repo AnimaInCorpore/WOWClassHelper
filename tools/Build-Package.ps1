@@ -11,7 +11,7 @@
     unzips it directly into Interface\AddOns.
 
     By default the Lua check (tools/Check-Lua.ps1) and the smoke test
-    (tools/Smoke-Test.ps1, skipped if Lua 5.1 isn't installed) run first and the
+    (tools/Smoke-Test.ps1 with Lua 5.1 or LuaJIT, skipped if neither is installed) run first and the
     build stops if one fails. Use -SkipCheck to build without them.
 
 .EXAMPLE
@@ -53,12 +53,15 @@ if (-not $SkipCheck) {
     & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Check-Lua.ps1') | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Lua check failed - fix the errors or use -SkipCheck.' }
 
-    if (Test-Path 'C:\msys64\ucrt64\bin\lua5.1.exe') {
-        Write-Host 'Running smoke test...'
-        & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Smoke-Test.ps1') | Out-Host
+    # Lua 5.1 first, LuaJIT (5.1 compatible) as fallback.
+    $lua = @('C:\msys64\ucrt64\bin\lua5.1.exe', 'C:\msys64\ucrt64\bin\luajit.exe') |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($lua) {
+        Write-Host "Running smoke test ($(Split-Path $lua -Leaf))..."
+        & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Smoke-Test.ps1') -Lua $lua | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Smoke test failed - fix the errors or use -SkipCheck.' }
     } else {
-        Write-Warning 'Lua 5.1 not installed - smoke test skipped (see tools/Smoke-Test.ps1).'
+        Write-Warning 'Neither Lua 5.1 nor LuaJIT installed - smoke test skipped (see tools/Smoke-Test.ps1).'
     }
 }
 
